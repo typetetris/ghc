@@ -3729,6 +3729,9 @@ ocVerifyImage_ELF ( ObjectCode* oc )
 
    IF_DEBUG(linker,debugBelch( "Architecture is " ));
    switch (ehdr->e_machine) {
+#ifdef EM_ARM
+      case EM_ARM:   IF_DEBUG(linker,debugBelch( "arm" )); break;
+#endif
       case EM_386:   IF_DEBUG(linker,debugBelch( "x86" )); break;
 #ifdef EM_SPARC32PLUS
       case EM_SPARC32PLUS:
@@ -4090,7 +4093,7 @@ ocGetNames_ELF ( ObjectCode* oc )
 }
 
 /* Do ELF relocations which lack an explicit addend.  All x86-linux
-   relocations appear to be of this form. */
+   and arm-linux relocations appear to be of this form. */
 static int
 do_Elf_Rel_relocations ( ObjectCode* oc, char* ehdrC,
                          Elf_Shdr* shdr, int shnum )
@@ -4138,6 +4141,9 @@ do_Elf_Rel_relocations ( ObjectCode* oc, char* ehdrC,
 #endif
       StgStablePtr stablePtr;
       StgPtr stableVal;
+#ifdef arm_HOST_ARCH
+      int T;
+#endif
 
       IF_DEBUG(linker,debugBelch( "Rel entry %3d is raw(%6p %6p)",
                              j, (void*)offset, (void*)info ));
@@ -4173,6 +4179,16 @@ do_Elf_Rel_relocations ( ObjectCode* oc, char* ehdrC,
             return 0;
          }
          IF_DEBUG(linker,debugBelch( "`%s' resolves to %p\n", symbol, (void*)S ));
+
+#ifdef arm_HOST_ARCH
+         // Thumb instructions have bit 0 of symbol's st_value set
+         T = sym.st_info & STT_FUNC && sym.st_value & 0x1;
+
+         // Make sure we clear bit 0. Strictly speaking we should have done
+         // this to st_value above but I believe alignment requirements should
+         // ensure that no instructions start on an odd address
+         S = S & ~1;
+#endif
       }
 
       IF_DEBUG(linker,debugBelch( "Reloc: P = %p   S = %p   A = %p\n",
@@ -4188,6 +4204,168 @@ do_Elf_Rel_relocations ( ObjectCode* oc, char* ehdrC,
          case R_386_32:   *pP = value;     break;
          case R_386_PC32: *pP = value - P; break;
 #        endif
+
+#        ifdef arm_HOST_ARCH
+         case R_ARM_ABS32:
+         case R_ARM_TARGET1:  // Specified by Linux ARM ABI
+            *(Elf32_Word *)P += S;
+            *(Elf32_Word *)P |= T;
+            break;
+
+         case R_ARM_REL32:
+            *(Elf32_Word *)P += S;
+            *(Elf32_Word *)P |= T;
+            *(Elf32_Word *)P -= P;
+            break;
+
+         case R_ARM_CALL:
+         case R_ARM_JUMP24:
+         {
+            StgWord32 *word = (StgWord32 *)P;
+            StgInt32 offset = (*word & 0x00ffffff) << 2;
+
+            // Sign extend 24 to 32 bits
+            if (offset & 0x02000000)
+               offset -= 0x04000000;
+            offset += ((S + offset) | T) - P;
+
+            if (T) {
+               // although we could support the case of BL with cond=0xe by
+               // turning instruction into BLX
+               errorBelch("%s: ARM to Thumb transition unsupported\n",
+                     oc->fileName);
+               return 0;
+            }
+
+            offset >>= 2;
+
+            *word = (*word & ~0x00ffffff)
+                  | (offset & 0x00ffffff);
+            break;
+         }
+
+         case R_ARM_MOVT_ABS:
+         case R_ARM_MOVW_ABS_NC:
+         {
+            StgWord32 *word = (StgWord32 *)P;
+            StgInt16 offset = ((*word & 0xf0000) >> 4)
+                            | (*word & 0xfff);
+            // Sign extend from 16 to 32 bits
+            offset = (offset ^ 0x8000) - 0x8000;
+
+            if (T) {
+               errorBelch("%s: ARM to Thumb transition unsupported\n",
+                     oc->fileName);
+               return 0;
+            }
+
+            offset += S;
+            if (ELF_R_TYPE(info) == R_ARM_THM_MOVW_ABS_NC)
+               offset |= T;
+            else
+               offset >>= 16;
+
+            offset = (offset + S) | T;
+            *word = (*word & 0xfff0f000)
+                  | ((offset & 0xf000) << 4)
+                  | (offset & 0x0fff);
+            break;
+         }
+
+         case R_ARM_THM_CALL:
+         case R_ARM_THM_JUMP24:
+         {
+            StgWord16 *upper = (StgWord16 *)P;
+            StgWord16 *lower = (StgWord16 *)(P + 2);
+            int sign = (*upper >> 10) & 1;
+            int j1, j2, i1, i2;
+
+            // Decode immediate value
+            j1 = (*lower >> 13) & 1; i1 = ~(j1 ^ sign) & 1;
+            j2 = (*lower >> 11) & 1; i2 = ~(j2 ^ sign) & 1;
+            StgInt32 offset = (sign << 24)
+                            | (i1 << 23)
+                            | (i2 << 22)
+                            | ((*upper & 0x03ff) << 12)
+                            | ((*lower & 0x07ff) << 1);
+
+            // Sign extend 25 to 32 bits
+            if (offset & 0x01000000)
+               offset -= 0x02000000;
+            offset = ((offset + S) | T) - P;
+
+            if (!T) {
+               errorBelch("%s: Thumb to ARM transition unsupported\n",
+                     oc->fileNmae);
+               return 0;
+            }
+
+            // Reencode instruction
+            i1 = ~(offset >> 23) & 1; j1 = sign ^ i1;
+            i2 = ~(offset >> 22) & 1; j2 = sign ^ i2;
+            *upper = ( (*upper & 0xf800)
+                   | (sign << 10)
+                   | ((offset >> 12) & 0x03ff) );
+            *lower = ( (*lower & 0xd000)
+                   | (i1 << 13)
+                   | (i2 << 11)
+                   | ((offset >> 1) & 0x07ff) );
+            break;
+         }
+
+         case R_ARM_THM_MOVT_ABS:
+         case R_ARM_THM_MOVW_ABS_NC:
+         {
+            StgWord16 *upper = (StgWord16 *)P;
+            StgWord16 *lower = (StgWord16 *)(P + 2);
+            StgWord16 offset = (*upper & 0x000f << 12)
+                             | ((*upper & 0x0400) << 1)
+                             | ((*lower & 0x7000) >> 4)
+                             | (*lower & 0x00ff);
+
+            offset += S;
+            if (ELF_R_TYPE(info) == R_ARM_THM_MOVW_ABS_NC)
+                   offset |= T;
+            else
+                   offset >>= 16;
+
+            if (!T) {
+               errorBelch("%s: Thumb to ARM transition unsupported\n",
+                     oc_fileName);
+               return 0;
+            }
+
+            *upper = ( (*upper & 0xfbf0)
+                   | ((offset & 0xf000) >> 12)
+                   | ((offset & 0x0800) >> 1) );
+            *lower = ( (*lower & 0x8f00)
+                   | ((offset & 0x0700) << 4)
+                   | (offset & 0x00ff) );
+            break;
+         }
+
+         case R_ARM_THM_JUMP8:
+         {
+            StgWord16 *word = (StgWord16 *)P;
+            StgWord offset = *word & 0x01fe;
+            offset += S - P;
+            *word = (*word & ~0x01fe)
+                  | (offset & 0x01fe);
+            break;
+         }
+         
+         case R_ARM_THM_JUMP11:
+         {
+            StgWord16 *word = (StgWord16 *)P;
+            StgWord offset = *word & 0x0ffe;
+            offset += S - P;
+            *word = (*word & ~0x0ffe)
+                  | (offset & 0x0ffe);
+            break;
+         }
+
+#        endif
+
          default:
             errorBelch("%s: unhandled ELF relocation(Rel) type %lu\n",
                   oc->fileName, (lnat)ELF_R_TYPE(info));
