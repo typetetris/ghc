@@ -660,6 +660,10 @@ pprCallishMachOp_for_C mop
         MO_Memcpy   -> ptext (sLit "memcpy")
         MO_Memset   -> ptext (sLit "memset")
         MO_Memmove  -> ptext (sLit "memmove")
+        MO_PopCnt W8-> ptext (sLit "hs_popcnt8")
+        MO_PopCnt W16-> ptext (sLit "hs_popcnt16")
+        MO_PopCnt W32-> ptext (sLit "hs_popcnt32")
+        MO_PopCnt W64-> ptext (sLit "hs_popcnt64")
         a -> panic $ "pprCallishMachOp_for_C: Unknown callish op! ("
                       ++ show a ++ ")"
 
