@@ -4180,7 +4180,7 @@ do_Elf_Rel_relocations ( ObjectCode* oc, char* ehdrC,
       StgStablePtr stablePtr;
       StgPtr stableVal;
 #ifdef arm_HOST_ARCH
-      int T;
+      int is_target_thm, T;
 #endif
 
       IF_DEBUG(linker,debugBelch( "Rel entry %3d is raw(%6p %6p)",
@@ -4220,7 +4220,8 @@ do_Elf_Rel_relocations ( ObjectCode* oc, char* ehdrC,
 
 #ifdef arm_HOST_ARCH
          // Thumb instructions have bit 0 of symbol's st_value set
-         T = sym.st_info & STT_FUNC && sym.st_value & 0x1;
+         is_target_thm = sym.st_value & 0x1;
+         T = sym.st_info & STT_FUNC && is_target_thm;
 
          // Make sure we clear bit 0. Strictly speaking we should have done
          // this to st_value above but I believe alignment requirements should
@@ -4267,18 +4268,28 @@ do_Elf_Rel_relocations ( ObjectCode* oc, char* ehdrC,
                offset -= 0x04000000;
             offset += ((S + offset) | T) - P;
 
-            if (T) {
-               // although we could support the case of BL with cond=0xe by
-               // turning instruction into BLX
-               errorBelch("%s: ARM to Thumb transition unsupported\n",
+            if (is_target_thm && ELF_R_TYPE(info) == R_ARM_THM_JUMP24) {
+               errorBelch("%s: ARM to Thumb transition with JUMP24 relocation not supported\n",
                      oc->fileName);
                return 0;
+            } else if (is_target_thm) {
+               StgWord32 cond = (*word & 0xf0000000) >> 28;
+               if (cond == 0xe) {
+                  // Change instruction to BLX
+                  *word |= 0xf0000000; // Change cond=0xf
+                  *word = (*word & ~0x01ffffff)
+                        | ((offset >> 2) & 0x00ffffff)  // imm24
+                        | ((offset & 0x2) << 23);       // H
+               } else {
+                  errorBelch("%s: Can't transition from ARM to Thumb when cond != 0xe\n",
+                        oc->fileName);
+                  return 0;
+               }
+            } else {
+               offset >>= 2;
+               *word = (*word & ~0x00ffffff)
+                     | (offset & 0x00ffffff);
             }
-
-            offset >>= 2;
-
-            *word = (*word & ~0x00ffffff)
-                  | (offset & 0x00ffffff);
             break;
          }
 
@@ -4332,10 +4343,17 @@ do_Elf_Rel_relocations ( ObjectCode* oc, char* ehdrC,
                offset -= 0x02000000;
             offset = ((offset + S) | T) - P;
 
-            if (!T) {
-               errorBelch("%s: Thumb to ARM transition unsupported\n",
-                     oc->fileNmae);
+            if (!is_target_thm && ELF_R_TYPE(info) == R_ARM_THM_JUMP24) {
+               // According to the ELF for ARM architecture spec, this requires
+               // us to generate veneer instructions.
+               // According to mru in Freenode's #beagle,
+               //   < mru> the veneer should probably load the address to r12 and and bx r12
+               errorBelch("%s: Thumb to ARM transition with JUMP24 relocation not supported\n",
+                     oc->fileName);
                return 0;
+            } else if (!is_target_thm) {
+               *lower &= ~(1<<12);   // Change instruction to BLX
+               offset &= ~1;         // Make sure offset is aligned properly
             }
 
             // Reencode instruction
