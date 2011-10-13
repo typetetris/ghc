@@ -4342,12 +4342,6 @@ do_Elf_Rel_relocations ( ObjectCode* oc, char* ehdrC,
             // Sign extend from 16 to 32 bits
             offset = (offset ^ 0x8000) - 0x8000;
 
-            if (T) {
-               errorBelch("%s: ARM to Thumb transition unsupported\n",
-                     oc->fileName);
-               return 0;
-            }
-
             offset += S;
             if (ELF_R_TYPE(info) == R_ARM_THM_MOVW_ABS_NC)
                offset |= T;
@@ -4424,12 +4418,6 @@ do_Elf_Rel_relocations ( ObjectCode* oc, char* ehdrC,
                    offset |= T;
             else
                    offset >>= 16;
-
-            if (!T) {
-               errorBelch("%s: Thumb to ARM transition unsupported\n",
-                     oc_fileName);
-               return 0;
-            }
 
             *upper = ( (*upper & 0xfbf0)
                    | ((offset & 0xf000) >> 12)
