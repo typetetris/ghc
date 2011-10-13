@@ -4433,6 +4433,12 @@ do_Elf_Rel_relocations ( ObjectCode* oc, char* ehdrC,
             StgWord16 *word = (StgWord16 *)P;
             StgWord offset = *word & 0x01fe;
             offset += S - P;
+            if (!is_target_thm) {
+               errorBelch("%s: Thumb to ARM transition with JUMP8 relocation not supported\n",
+                     oc->fileName);
+               return 0;
+            }
+
             *word = (*word & ~0x01fe)
                   | (offset & 0x01fe);
             break;
@@ -4443,6 +4449,12 @@ do_Elf_Rel_relocations ( ObjectCode* oc, char* ehdrC,
             StgWord16 *word = (StgWord16 *)P;
             StgWord offset = *word & 0x0ffe;
             offset += S - P;
+            if (!is_target_thm) {
+               errorBelch("%s: Thumb to ARM transition with JUMP11 relocation not supported\n",
+                     oc->fileName);
+               return 0;
+            }
+
             *word = (*word & ~0x0ffe)
                   | (offset & 0x0ffe);
             break;
