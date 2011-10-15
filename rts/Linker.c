@@ -2570,7 +2570,7 @@ static SymbolExtra* makeSymbolExtra( ObjectCode* oc,
   extra->jumpIsland.bctr        = 0x4e800420;
 #endif
 #ifdef x86_64_HOST_ARCH
-        // jmp *-14(%rip)
+  // jmp *-14(%rip)
   static uint8_t jmp[] = { 0xFF, 0x25, 0xF2, 0xFF, 0xFF, 0xFF };
   extra->addr = target;
   memcpy(extra->jumpIsland, jmp, 6);
@@ -2579,7 +2579,73 @@ static SymbolExtra* makeSymbolExtra( ObjectCode* oc,
   return extra;
 }
 
-#endif
+#ifdef arm_HOST_ARCH
+static SymbolExtra* makeArmSymbolExtra( ObjectCode* oc,
+                                        unsigned long symbolNumber,
+                                        unsigned long target,
+                                        int toThumb )
+{
+  SymbolExtra *extra;
+
+  ASSERT( symbolNumber >= oc->first_symbol_extra
+        && symbolNumber - oc->first_symbol_extra < oc->n_symbol_extras);
+
+  extra = &oc->symbol_extras[symbolNumber - oc->first_symbol_extra];
+
+
+  if (toThumb) {
+    // In ARM encoding:
+    //   movw r12, #0
+    //   movt r12, #0
+    //   blx r12
+    static uint8_t code[] = { 0xe3, 0x00, 0xc0, 0x00,
+                              0xe3, 0x40, 0xc0, 0x00,
+                              0xe1, 0x2f, 0xff, 0x3c };
+
+    // BLX expects a PC-relative address
+    target -= (extra->jumpIsland + 8);
+
+    // Patch lower half-word into movw
+    code[1] |= (target>>12) & 0xf;
+    code[2] |= (target>>8) & 0xf;
+    code[3] |= target & 0xff;
+    // Patch upper half-word into movt
+    code[5] |= (target>>28) & 0xf;
+    code[6] |= (target>>24) & 0xf;
+    code[7] |= (target>>16) & 0xff;
+
+    memcpy(extra->jumpIsland, jmp, 12);
+  } else {
+    // In Thumb encoding:
+    //   movw r12, #0
+    //   movt r12, #0
+    //   blx r12
+    static uint8_t code[] = { 0xf2, 0x40,  0x0c, 0x00,
+                              0xf2, 0xc0,  0x0c, 0x00,
+                              0x47, 0xe0 };
+
+    // BLX expects a PC-relative address
+    target -= (extra->jumpIsland + 8);
+
+    // Patch lower half-word into movw
+    code[0] |= ((target>>11) & 0x1) << 2;
+    code[1] |= (target>>12) & 0xf;
+    code[2] |= ((target>>8) & 0x7) << 4;
+    code[3] |= target & 0xff;
+    // Patch upper half-word into movt
+    code[4] |= ((target>>27) & 0x1) << 2;
+    code[5] |= (target>>28) & 0xf;
+    code[6] |= ((target>>24) & 0x7) << 4;
+    code[7] |= (target>>16) & 0xff;
+
+    memcpy(extra->jumpIsland, jmp, 10);
+  }
+
+  return extra;
+}
+#endif // arm_HOST_ARCH
+
+#endif // defined(powerpc_HOST_ARCH) || defined(x86_64_HOST_ARCH)
 
 /* --------------------------------------------------------------------------
  * PowerPC specifics (instruction cache flushing)
@@ -4375,20 +4441,16 @@ do_Elf_Rel_relocations ( ObjectCode* oc, char* ehdrC,
             // Sign extend 25 to 32 bits
             if (offset & 0x01000000)
                offset -= 0x02000000;
-            offset = ((offset + S) | T) - P;
 
             if (!is_target_thm && ELF_R_TYPE(info) == R_ARM_THM_JUMP24) {
-               // According to the ELF for ARM architecture spec, this requires
-               // us to generate veneer instructions.
-               // According to mru in Freenode's #beagle,
-               //   < mru> the veneer should probably load the address to r12 and and bx r12
-               errorBelch("%s: Thumb to ARM transition with JUMP24 relocation not supported\n",
-                     oc->fileName);
-               return 0;
+               // Generate veneer
+               S = &(makeArmSymbolExtra(oc, ELF_R_SYM(info), S+offset, 0)->jumpIsland);
             } else if (!is_target_thm) {
                *lower &= ~(1<<12);   // Change instruction to BLX
                offset &= ~1;         // Make sure offset is aligned properly
             }
+
+            offset = ((offset + S) | T) - P;
 
             // Reencode instruction
             i1 = ~(offset >> 23) & 1; j1 = sign ^ i1;
