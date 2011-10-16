@@ -4334,10 +4334,9 @@ do_Elf_Rel_relocations ( ObjectCode* oc, char* ehdrC,
                offset -= 0x04000000;
             offset += ((S + offset) | T) - P;
 
-            if (is_target_thm && ELF_R_TYPE(info) == R_ARM_THM_JUMP24) {
-               errorBelch("%s: ARM to Thumb transition with JUMP24 relocation not supported\n",
-                     oc->fileName);
-               return 0;
+            if (is_target_thm && ELF_R_TYPE(info) == R_ARM_JUMP24) {
+               // Generate veneer
+               S = &(makeArmSymbolExtra(oc, ELF_R_SYM(info), S+offset, 1)->jumpIsland);
             } else if (is_target_thm) {
                StgWord32 cond = (*word & 0xf0000000) >> 28;
                if (cond == 0xe) {
