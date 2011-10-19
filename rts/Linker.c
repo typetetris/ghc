@@ -2530,7 +2530,7 @@ static SymbolExtra* makeSymbolExtra( ObjectCode* oc,
   extra->jumpIsland.bctr        = 0x4e800420;
 #endif
 #ifdef x86_64_HOST_ARCH
-        // jmp *-14(%rip)
+  // jmp *-14(%rip)
   static uint8_t jmp[] = { 0xFF, 0x25, 0xF2, 0xFF, 0xFF, 0xFF };
   extra->addr = target;
   memcpy(extra->jumpIsland, jmp, 6);
@@ -2539,7 +2539,73 @@ static SymbolExtra* makeSymbolExtra( ObjectCode* oc,
   return extra;
 }
 
-#endif
+#ifdef arm_HOST_ARCH
+static SymbolExtra* makeArmSymbolExtra( ObjectCode* oc,
+                                        unsigned long symbolNumber,
+                                        unsigned long target,
+                                        int toThumb )
+{
+  SymbolExtra *extra;
+
+  ASSERT( symbolNumber >= oc->first_symbol_extra
+        && symbolNumber - oc->first_symbol_extra < oc->n_symbol_extras);
+
+  extra = &oc->symbol_extras[symbolNumber - oc->first_symbol_extra];
+
+
+  if (toThumb) {
+    // In ARM encoding:
+    //   movw r12, #0
+    //   movt r12, #0
+    //   blx r12
+    static uint8_t code[] = { 0xe3, 0x00, 0xc0, 0x00,
+                              0xe3, 0x40, 0xc0, 0x00,
+                              0xe1, 0x2f, 0xff, 0x3c };
+
+    // BLX expects a PC-relative address
+    target -= (extra->jumpIsland + 8);
+
+    // Patch lower half-word into movw
+    code[1] |= (target>>12) & 0xf;
+    code[2] |= (target>>8) & 0xf;
+    code[3] |= target & 0xff;
+    // Patch upper half-word into movt
+    code[5] |= (target>>28) & 0xf;
+    code[6] |= (target>>24) & 0xf;
+    code[7] |= (target>>16) & 0xff;
+
+    memcpy(extra->jumpIsland, jmp, 12);
+  } else {
+    // In Thumb encoding:
+    //   movw r12, #0
+    //   movt r12, #0
+    //   blx r12
+    static uint8_t code[] = { 0xf2, 0x40,  0x0c, 0x00,
+                              0xf2, 0xc0,  0x0c, 0x00,
+                              0x47, 0xe0 };
+
+    // BLX expects a PC-relative address
+    target -= (extra->jumpIsland + 8);
+
+    // Patch lower half-word into movw
+    code[0] |= ((target>>11) & 0x1) << 2;
+    code[1] |= (target>>12) & 0xf;
+    code[2] |= ((target>>8) & 0x7) << 4;
+    code[3] |= target & 0xff;
+    // Patch upper half-word into movt
+    code[4] |= ((target>>27) & 0x1) << 2;
+    code[5] |= (target>>28) & 0xf;
+    code[6] |= ((target>>24) & 0x7) << 4;
+    code[7] |= (target>>16) & 0xff;
+
+    memcpy(extra->jumpIsland, jmp, 10);
+  }
+
+  return extra;
+}
+#endif // arm_HOST_ARCH
+
+#endif // defined(powerpc_HOST_ARCH) || defined(x86_64_HOST_ARCH)
 
 /* --------------------------------------------------------------------------
  * PowerPC specifics (instruction cache flushing)
@@ -3535,6 +3601,44 @@ ocResolve_PEi386 ( ObjectCode* oc )
 #    define R_X86_64_PC64 24
 #  endif
 
+/* 
+ * Workaround for glibc implementations (e.g. eglibc) with incomplete
+ * relocation lists
+ */
+#ifndef R_ARM_THM_CALL
+#  define R_ARM_THM_CALL      10
+#endif
+#ifndef R_ARM_CALL
+#  define R_ARM_CALL      28
+#endif
+#ifndef R_ARM_JUMP24
+#  define R_ARM_JUMP24      29
+#endif
+#ifndef R_ARM_THM_JUMP24
+#  define R_ARM_THM_JUMP24      30
+#endif
+#ifndef R_ARM_TARGET1
+#  define R_ARM_TARGET1      38
+#endif
+#ifndef R_ARM_MOVW_ABS_NC
+#  define R_ARM_MOVW_ABS_NC      43
+#endif
+#ifndef R_ARM_MOVT_ABS
+#  define R_ARM_MOVT_ABS      44
+#endif
+#ifndef R_ARM_THM_MOVW_ABS_NC
+#  define R_ARM_THM_MOVW_ABS_NC   47
+#endif
+#ifndef R_ARM_THM_MOVT_ABS
+#  define R_ARM_THM_MOVT_ABS      48
+#endif
+#ifndef R_ARM_THM_JUMP11
+#  define R_ARM_THM_JUMP11      102
+#endif
+#ifndef R_ARM_THM_JUMP8
+#  define R_ARM_THM_JUMP8      103
+#endif
+
 /*
  * Define a set of types which can be used for both ELF32 and ELF64
  */
@@ -3729,6 +3833,9 @@ ocVerifyImage_ELF ( ObjectCode* oc )
 
    IF_DEBUG(linker,debugBelch( "Architecture is " ));
    switch (ehdr->e_machine) {
+#ifdef EM_ARM
+      case EM_ARM:   IF_DEBUG(linker,debugBelch( "arm" )); break;
+#endif
       case EM_386:   IF_DEBUG(linker,debugBelch( "x86" )); break;
 #ifdef EM_SPARC32PLUS
       case EM_SPARC32PLUS:
@@ -4090,7 +4197,7 @@ ocGetNames_ELF ( ObjectCode* oc )
 }
 
 /* Do ELF relocations which lack an explicit addend.  All x86-linux
-   relocations appear to be of this form. */
+   and arm-linux relocations appear to be of this form. */
 static int
 do_Elf_Rel_relocations ( ObjectCode* oc, char* ehdrC,
                          Elf_Shdr* shdr, int shnum )
@@ -4138,6 +4245,9 @@ do_Elf_Rel_relocations ( ObjectCode* oc, char* ehdrC,
 #endif
       StgStablePtr stablePtr;
       StgPtr stableVal;
+#ifdef arm_HOST_ARCH
+      int is_target_thm, T;
+#endif
 
       IF_DEBUG(linker,debugBelch( "Rel entry %3d is raw(%6p %6p)",
                              j, (void*)offset, (void*)info ));
@@ -4173,6 +4283,17 @@ do_Elf_Rel_relocations ( ObjectCode* oc, char* ehdrC,
             return 0;
          }
          IF_DEBUG(linker,debugBelch( "`%s' resolves to %p\n", symbol, (void*)S ));
+
+#ifdef arm_HOST_ARCH
+         // Thumb instructions have bit 0 of symbol's st_value set
+         is_target_thm = sym.st_value & 0x1;
+         T = sym.st_info & STT_FUNC && is_target_thm;
+
+         // Make sure we clear bit 0. Strictly speaking we should have done
+         // this to st_value above but I believe alignment requirements should
+         // ensure that no instructions start on an odd address
+         S = S & ~1;
+#endif
       }
 
       IF_DEBUG(linker,debugBelch( "Reloc: P = %p   S = %p   A = %p\n",
@@ -4188,6 +4309,180 @@ do_Elf_Rel_relocations ( ObjectCode* oc, char* ehdrC,
          case R_386_32:   *pP = value;     break;
          case R_386_PC32: *pP = value - P; break;
 #        endif
+
+#        ifdef arm_HOST_ARCH
+         case R_ARM_ABS32:
+         case R_ARM_TARGET1:  // Specified by Linux ARM ABI
+            *(Elf32_Word *)P += S;
+            *(Elf32_Word *)P |= T;
+            break;
+
+         case R_ARM_REL32:
+            *(Elf32_Word *)P += S;
+            *(Elf32_Word *)P |= T;
+            *(Elf32_Word *)P -= P;
+            break;
+
+         case R_ARM_CALL:
+         case R_ARM_JUMP24:
+         {
+            StgWord32 *word = (StgWord32 *)P;
+            StgInt32 offset = (*word & 0x00ffffff) << 2;
+
+            // Sign extend 24 to 32 bits
+            if (offset & 0x02000000)
+               offset -= 0x04000000;
+            offset += ((S + offset) | T) - P;
+
+            if (is_target_thm && ELF_R_TYPE(info) == R_ARM_JUMP24) {
+               // Generate veneer
+               S = &(makeArmSymbolExtra(oc, ELF_R_SYM(info), S+offset, 1)->jumpIsland);
+            } else if (is_target_thm) {
+               StgWord32 cond = (*word & 0xf0000000) >> 28;
+               if (cond == 0xe) {
+                  // Change instruction to BLX
+                  *word |= 0xf0000000; // Change cond=0xf
+                  *word = (*word & ~0x01ffffff)
+                        | ((offset >> 2) & 0x00ffffff)  // imm24
+                        | ((offset & 0x2) << 23);       // H
+               } else {
+                  errorBelch("%s: Can't transition from ARM to Thumb when cond != 0xe\n",
+                        oc->fileName);
+                  return 0;
+               }
+            } else {
+               offset >>= 2;
+               *word = (*word & ~0x00ffffff)
+                     | (offset & 0x00ffffff);
+            }
+            break;
+         }
+
+         case R_ARM_MOVT_ABS:
+         case R_ARM_MOVW_ABS_NC:
+         {
+            StgWord32 *word = (StgWord32 *)P;
+            StgInt16 offset = ((*word & 0xf0000) >> 4)
+                            | (*word & 0xfff);
+            // Sign extend from 16 to 32 bits
+            offset = (offset ^ 0x8000) - 0x8000;
+
+            offset += S;
+            if (ELF_R_TYPE(info) == R_ARM_THM_MOVW_ABS_NC)
+               offset |= T;
+            else
+               offset >>= 16;
+
+            offset = (offset + S) | T;
+            *word = (*word & 0xfff0f000)
+                  | ((offset & 0xf000) << 4)
+                  | (offset & 0x0fff);
+            break;
+         }
+
+         case R_ARM_THM_CALL:
+         case R_ARM_THM_JUMP24:
+         {
+            StgWord16 *upper = (StgWord16 *)P;
+            StgWord16 *lower = (StgWord16 *)(P + 2);
+            int sign = (*upper >> 10) & 1;
+            int j1, j2, i1, i2;
+
+            // Decode immediate value
+            j1 = (*lower >> 13) & 1; i1 = ~(j1 ^ sign) & 1;
+            j2 = (*lower >> 11) & 1; i2 = ~(j2 ^ sign) & 1;
+            StgInt32 offset = (sign << 24)
+                            | (i1 << 23)
+                            | (i2 << 22)
+                            | ((*upper & 0x03ff) << 12)
+                            | ((*lower & 0x07ff) << 1);
+
+            // Sign extend 25 to 32 bits
+            if (offset & 0x01000000)
+               offset -= 0x02000000;
+
+            if (!is_target_thm && ELF_R_TYPE(info) == R_ARM_THM_JUMP24) {
+               // Generate veneer
+               S = &(makeArmSymbolExtra(oc, ELF_R_SYM(info), S+offset, 0)->jumpIsland);
+            } else if (!is_target_thm) {
+               *lower &= ~(1<<12);   // Change instruction to BLX
+               offset &= ~1;         // Make sure offset is aligned properly
+            }
+
+            offset = ((offset + S) | T) - P;
+
+            // Reencode instruction
+            i1 = ~(offset >> 23) & 1; j1 = sign ^ i1;
+            i2 = ~(offset >> 22) & 1; j2 = sign ^ i2;
+            *upper = ( (*upper & 0xf800)
+                   | (sign << 10)
+                   | ((offset >> 12) & 0x03ff) );
+            *lower = ( (*lower & 0xd000)
+                   | (i1 << 13)
+                   | (i2 << 11)
+                   | ((offset >> 1) & 0x07ff) );
+            break;
+         }
+
+         case R_ARM_THM_MOVT_ABS:
+         case R_ARM_THM_MOVW_ABS_NC:
+         {
+            StgWord16 *upper = (StgWord16 *)P;
+            StgWord16 *lower = (StgWord16 *)(P + 2);
+            StgWord16 offset = (*upper & 0x000f << 12)
+                             | ((*upper & 0x0400) << 1)
+                             | ((*lower & 0x7000) >> 4)
+                             | (*lower & 0x00ff);
+
+            offset += S;
+            if (ELF_R_TYPE(info) == R_ARM_THM_MOVW_ABS_NC)
+                   offset |= T;
+            else
+                   offset >>= 16;
+
+            *upper = ( (*upper & 0xfbf0)
+                   | ((offset & 0xf000) >> 12)
+                   | ((offset & 0x0800) >> 1) );
+            *lower = ( (*lower & 0x8f00)
+                   | ((offset & 0x0700) << 4)
+                   | (offset & 0x00ff) );
+            break;
+         }
+
+         case R_ARM_THM_JUMP8:
+         {
+            StgWord16 *word = (StgWord16 *)P;
+            StgWord offset = *word & 0x01fe;
+            offset += S - P;
+            if (!is_target_thm) {
+               errorBelch("%s: Thumb to ARM transition with JUMP8 relocation not supported\n",
+                     oc->fileName);
+               return 0;
+            }
+
+            *word = (*word & ~0x01fe)
+                  | (offset & 0x01fe);
+            break;
+         }
+         
+         case R_ARM_THM_JUMP11:
+         {
+            StgWord16 *word = (StgWord16 *)P;
+            StgWord offset = *word & 0x0ffe;
+            offset += S - P;
+            if (!is_target_thm) {
+               errorBelch("%s: Thumb to ARM transition with JUMP11 relocation not supported\n",
+                     oc->fileName);
+               return 0;
+            }
+
+            *word = (*word & ~0x0ffe)
+                  | (offset & 0x0ffe);
+            break;
+         }
+
+#        endif
+
          default:
             errorBelch("%s: unhandled ELF relocation(Rel) type %lu\n",
                   oc->fileName, (lnat)ELF_R_TYPE(info));
