@@ -4344,25 +4344,27 @@ do_Elf_Rel_relocations ( ObjectCode* oc, char* ehdrC,
 
             if (is_target_thm && ELF_R_TYPE(info) == R_ARM_JUMP24) {
                // Generate veneer
-               S = &(makeArmSymbolExtra(oc, ELF_R_SYM(info), S+offset, 1)->jumpIsland);
+               offset = &(makeArmSymbolExtra(oc, ELF_R_SYM(info), S+offset, 1)->jumpIsland);
+               offset -= P;
             } else if (is_target_thm) {
                StgWord32 cond = (*word & 0xf0000000) >> 28;
                if (cond == 0xe) {
                   // Change instruction to BLX
-                  *word |= 0xf0000000; // Change cond=0xf
+                  *word |= 0xf0000000; // Set first nibble
                   *word = (*word & ~0x01ffffff)
                         | ((offset >> 2) & 0x00ffffff)  // imm24
                         | ((offset & 0x2) << 23);       // H
+                  break;
                } else {
                   errorBelch("%s: Can't transition from ARM to Thumb when cond != 0xe\n",
                         oc->fileName);
                   return 0;
                }
-            } else {
-               offset >>= 2;
-               *word = (*word & ~0x00ffffff)
-                     | (offset & 0x00ffffff);
             }
+
+            offset >>= 2;
+            *word = (*word & ~0x00ffffff)
+                  | (offset & 0x00ffffff);
             break;
          }
 
