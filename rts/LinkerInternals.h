@@ -106,7 +106,7 @@ typedef struct _ObjectCode {
     unsigned int pltIndex;
 #endif
 
-#if powerpc_HOST_ARCH || x86_64_HOST_ARCH
+#if powerpc_HOST_ARCH || x86_64_HOST_ARCH || arm_HOST_ARCH
     SymbolExtra    *symbol_extras;
     unsigned long   first_symbol_extra;
     unsigned long   n_symbol_extras;
