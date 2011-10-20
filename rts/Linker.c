@@ -2579,6 +2579,8 @@ static SymbolExtra* makeSymbolExtra( ObjectCode* oc,
   return extra;
 }
 
+#endif // defined(powerpc_HOST_ARCH) || defined(x86_64_HOST_ARCH)
+
 #ifdef arm_HOST_ARCH
 static SymbolExtra* makeArmSymbolExtra( ObjectCode* oc,
                                         unsigned long symbolNumber,
@@ -2644,8 +2646,6 @@ static SymbolExtra* makeArmSymbolExtra( ObjectCode* oc,
   return extra;
 }
 #endif // arm_HOST_ARCH
-
-#endif // defined(powerpc_HOST_ARCH) || defined(x86_64_HOST_ARCH)
 
 /* --------------------------------------------------------------------------
  * PowerPC specifics (instruction cache flushing)
