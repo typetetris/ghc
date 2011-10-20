@@ -4453,7 +4453,8 @@ do_Elf_Rel_relocations ( ObjectCode* oc, char* ehdrC,
 
             if (!is_target_thm && ELF_R_TYPE(info) == R_ARM_THM_JUMP24) {
                // Generate veneer
-               S = &(makeArmSymbolExtra(oc, ELF_R_SYM(info), S+offset, 0)->jumpIsland);
+               offset = &(makeArmSymbolExtra(oc, ELF_R_SYM(info), S+offset, 0)->jumpIsland);
+               S = 0;
             } else if (!is_target_thm) {
                *lower &= ~(1<<12);   // Change instruction to BLX
                offset &= ~1;         // Make sure offset is aligned properly
