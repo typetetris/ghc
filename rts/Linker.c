@@ -4368,11 +4368,19 @@ do_Elf_Rel_relocations ( ObjectCode* oc, char* ehdrC,
          {
             StgWord32 *word = (StgWord32 *)P;
             StgInt32 offset = (*word & 0x00ffffff) << 2;
+            int overflow;
 
             // Sign extend 24 to 32 bits
             if (offset & 0x02000000)
                offset -= 0x04000000;
             offset += ((S + offset) | T) - P;
+
+            overflow = offset <= (StgInt32)0xfe000000 || offset >= (StgInt32)0x02000000;
+            if (overflow) {
+                  errorBelch("%s: Relocation (offset=%08x) out of range\n",
+                        oc->fileName, P);
+                  return 0;
+            }
 
             if (is_target_thm && ELF_R_TYPE(info) == R_ARM_JUMP24) {
                // Generate veneer
@@ -4450,6 +4458,11 @@ do_Elf_Rel_relocations ( ObjectCode* oc, char* ehdrC,
             }
 
             offset = ((offset + S) | T) - P;
+            if (offset <= 0xff000000 || offset >= 0x01000000) {
+               errorBelch("%s: Relocation (offset=%08x) out of range\n",
+                     oc->fileName, offset);
+               return 0;
+            }
 
             // Reencode instruction
             i1 = ~(offset >> 23) & 1; j1 = sign ^ i1;
