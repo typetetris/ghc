@@ -2605,7 +2605,7 @@ static SymbolExtra* makeArmSymbolExtra( ObjectCode* oc,
                               0xe1, 0x2f, 0xff, 0x3c };
 
     // BLX expects a PC-relative address
-    target -= (extra->jumpIsland + 8);
+    target -= ((unsigned int) extra->jumpIsland + 8);
 
     // Patch lower half-word into movw
     code[1] |= (target>>12) & 0xf;
@@ -2616,7 +2616,7 @@ static SymbolExtra* makeArmSymbolExtra( ObjectCode* oc,
     code[6] |= (target>>24) & 0xf;
     code[7] |= (target>>16) & 0xff;
 
-    memcpy(extra->jumpIsland, jmp, 12);
+    memcpy(extra->jumpIsland, code, 12);
   } else {
     // In Thumb encoding:
     //   movw r12, #0
@@ -2627,7 +2627,7 @@ static SymbolExtra* makeArmSymbolExtra( ObjectCode* oc,
                               0x47, 0xe0 };
 
     // BLX expects a PC-relative address
-    target -= (extra->jumpIsland + 8);
+    target -= ((unsigned int) extra->jumpIsland + 8);
 
     // Patch lower half-word into movw
     code[0] |= ((target>>11) & 0x1) << 2;
@@ -2640,7 +2640,7 @@ static SymbolExtra* makeArmSymbolExtra( ObjectCode* oc,
     code[6] |= ((target>>24) & 0x7) << 4;
     code[7] |= (target>>16) & 0xff;
 
-    memcpy(extra->jumpIsland, jmp, 10);
+    memcpy(extra->jumpIsland, code, 10);
   }
 
   return extra;
