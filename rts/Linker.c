@@ -4246,7 +4246,7 @@ do_Elf_Rel_relocations ( ObjectCode* oc, char* ehdrC,
       StgStablePtr stablePtr;
       StgPtr stableVal;
 #ifdef arm_HOST_ARCH
-      int is_target_thm, T;
+      int is_target_thm=0, T=0;
 #endif
 
       IF_DEBUG(linker,debugBelch( "Rel entry %3d is raw(%6p %6p)",
@@ -4292,7 +4292,7 @@ do_Elf_Rel_relocations ( ObjectCode* oc, char* ehdrC,
          // Make sure we clear bit 0. Strictly speaking we should have done
          // this to st_value above but I believe alignment requirements should
          // ensure that no instructions start on an odd address
-         S = S & ~1;
+         S &= ~1;
 #endif
       }
 
