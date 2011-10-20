@@ -4333,7 +4333,7 @@ do_Elf_Rel_relocations ( ObjectCode* oc, char* ehdrC,
             // Sign extend 24 to 32 bits
             if (offset & 0x02000000)
                offset -= 0x04000000;
-            offset += ((S + offset) | T) - P;
+            offset = ((S + offset) | T) - P;
 
             overflow = offset <= (StgInt32)0xfe000000 || offset >= (StgInt32)0x02000000;
             if (overflow) {
