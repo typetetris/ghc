@@ -2430,7 +2430,7 @@ addSection ( ObjectCode* oc, SectionKind kind,
   ocAllocateSymbolExtras
 
   Allocate additional space at the end of the object file image to make room
-  for jump islands (powerpc, x86_64) and GOT entries (x86_64).
+  for jump islands (powerpc, x86_64, arm) and GOT entries (x86_64).
 
   PowerPC relative branch instructions have a 24 bit displacement field.
   As PPC code is always 4-byte-aligned, this yields a +-32MB range.
@@ -2549,6 +2549,7 @@ static SymbolExtra* makeSymbolExtra( ObjectCode* oc,
 static SymbolExtra* makeArmSymbolExtra( ObjectCode* oc,
                                         unsigned long symbolNumber,
                                         unsigned long target,
+                                        int fromThumb,
                                         int toThumb )
 {
   SymbolExtra *extra;
@@ -2558,51 +2559,50 @@ static SymbolExtra* makeArmSymbolExtra( ObjectCode* oc,
 
   extra = &oc->symbol_extras[symbolNumber - oc->first_symbol_extra];
 
+  // Make sure instruction mode bit is set properly
+  if (toThumb)
+    target |= 1;
+  else
+    target &= ~1;
 
-  if (toThumb) {
+  if (!fromThumb) {
     // In ARM encoding:
     //   movw r12, #0
     //   movt r12, #0
-    //   blx r12
-    static uint8_t code[] = { 0xe3, 0x00, 0xc0, 0x00,
-                              0xe3, 0x40, 0xc0, 0x00,
-                              0xe1, 0x2f, 0xff, 0x3c };
-
-    // BLX expects a PC-relative address
-    target -= ((unsigned int) extra->jumpIsland + 8);
+    //   bkpt #2
+    //   bx r12
+    uint32_t code[] = { 0xe300c000, 0xe340c000, 0xe12fff1c };
 
     // Patch lower half-word into movw
-    code[1] |= (target>>12) & 0xf;
-    code[2] |= (target>>8) & 0xf;
-    code[3] |= target & 0xff;
+    code[0] |= ((target>>12) & 0xf) << 16;
+    code[0] |= target & 0xfff;
     // Patch upper half-word into movt
-    code[5] |= (target>>28) & 0xf;
-    code[6] |= (target>>24) & 0xf;
-    code[7] |= (target>>16) & 0xff;
+    target >>= 16;
+    code[1] |= ((target>>12) & 0xf) << 16;
+    code[1] |= target & 0xfff;
 
     memcpy(extra->jumpIsland, code, 12);
+
   } else {
     // In Thumb encoding:
     //   movw r12, #0
     //   movt r12, #0
-    //   blx r12
-    static uint8_t code[] = { 0xf2, 0x40,  0x0c, 0x00,
-                              0xf2, 0xc0,  0x0c, 0x00,
-                              0x47, 0xe0 };
-
-    // BLX expects a PC-relative address
-    target -= ((unsigned int) extra->jumpIsland + 8);
+    //   bx r12
+    static uint16_t code[] = { 0xf240,  0x0c00,
+                               0xf2c0,  0x0c00,
+                               0x4760 };
 
     // Patch lower half-word into movw
-    code[0] |= ((target>>11) & 0x1) << 2;
-    code[1] |= (target>>12) & 0xf;
-    code[2] |= ((target>>8) & 0x7) << 4;
-    code[3] |= target & 0xff;
+    code[0] |= ((target>>11) & 0x1) << 10;
+    code[0] |= (target>>12) & 0xf;
+    code[1] |= ((target>>8) & 0x7) << 12;
+    code[1] |= target & 0xff;
     // Patch upper half-word into movt
-    code[4] |= ((target>>27) & 0x1) << 2;
-    code[5] |= (target>>28) & 0xf;
-    code[6] |= ((target>>24) & 0x7) << 4;
-    code[7] |= (target>>16) & 0xff;
+    target >>= 16;
+    code[2] |= ((target>>11) & 0x1) << 10;
+    code[2] |= (target>>12) & 0xf;
+    code[3] |= ((target>>8) & 0x7) << 12;
+    code[3] |= target & 0xff;
 
     memcpy(extra->jumpIsland, code, 10);
   }
@@ -4331,26 +4331,23 @@ do_Elf_Rel_relocations ( ObjectCode* oc, char* ehdrC,
          case R_ARM_JUMP24:
          {
             StgWord32 *word = (StgWord32 *)P;
-            StgInt32 offset = (*word & 0x00ffffff) << 2;
+            StgInt32 imm = (*word & 0x00ffffff) << 2;
+            StgInt32 offset;
             int overflow;
 
             // Sign extend 24 to 32 bits
-            if (offset & 0x02000000)
-               offset -= 0x04000000;
-            offset = ((S + offset) | T) - P;
+            if (imm & 0x02000000)
+               imm -= 0x04000000;
+            offset = ((S + imm) | T) - P;
 
             overflow = offset <= (StgInt32)0xfe000000 || offset >= (StgInt32)0x02000000;
-            if (overflow) {
-                  errorBelch("%s: Relocation (offset=%08x) out of range\n",
-                        oc->fileName, P);
-                  return 0;
-            }
 
-            if (is_target_thm && ELF_R_TYPE(info) == R_ARM_JUMP24) {
+            if ((is_target_thm && ELF_R_TYPE(info) == R_ARM_JUMP24) || overflow) {
                // Generate veneer
-               offset = &(makeArmSymbolExtra(oc, ELF_R_SYM(info), S+offset, 1)->jumpIsland);
-               offset -= P;
-            } else if (is_target_thm) {
+               offset = &(makeArmSymbolExtra(oc, ELF_R_SYM(info), S+imm, 0, is_target_thm)->jumpIsland);
+               offset -= P - 8;
+               offset &= ~1; // Clear instruction mode bit
+            } else if (is_target_thm && ELF_R_TYPE(info) == R_ARM_CALL) {
                StgWord32 cond = (*word & 0xf0000000) >> 28;
                if (cond == 0xe) {
                   // Change instruction to BLX
@@ -4382,12 +4379,11 @@ do_Elf_Rel_relocations ( ObjectCode* oc, char* ehdrC,
             offset = (offset ^ 0x8000) - 0x8000;
 
             offset += S;
-            if (ELF_R_TYPE(info) == R_ARM_THM_MOVW_ABS_NC)
-               offset |= T;
-            else
+            if (ELF_R_TYPE(info) == R_ARM_THM_MOVT_ABS)
                offset >>= 16;
+            else
+               offset |= T;
 
-            offset = (offset + S) | T;
             *word = (*word & 0xfff0f000)
                   | ((offset & 0xf000) << 4)
                   | (offset & 0x0fff);
@@ -4399,36 +4395,35 @@ do_Elf_Rel_relocations ( ObjectCode* oc, char* ehdrC,
          {
             StgWord16 *upper = (StgWord16 *)P;
             StgWord16 *lower = (StgWord16 *)(P + 2);
+
+            int overflow;
             int sign = (*upper >> 10) & 1;
             int j1, j2, i1, i2;
 
             // Decode immediate value
             j1 = (*lower >> 13) & 1; i1 = ~(j1 ^ sign) & 1;
             j2 = (*lower >> 11) & 1; i2 = ~(j2 ^ sign) & 1;
-            StgInt32 offset = (sign << 24)
-                            | (i1 << 23)
-                            | (i2 << 22)
-                            | ((*upper & 0x03ff) << 12)
-                            | ((*lower & 0x07ff) << 1);
+            StgInt32 imm = (sign << 24)
+                         | (i1 << 23)
+                         | (i2 << 22)
+                         | ((*upper & 0x03ff) << 12)
+                         | ((*lower & 0x07ff) << 1);
 
             // Sign extend 25 to 32 bits
-            if (offset & 0x01000000)
-               offset -= 0x02000000;
+            if (imm & 0x01000000)
+               imm -= 0x02000000;
 
-            if (!is_target_thm && ELF_R_TYPE(info) == R_ARM_THM_JUMP24) {
+            offset = ((imm + S) | T) - P;
+            overflow = offset <= (StgInt32)0xff000000 || offset >= (StgInt32)0x01000000;
+
+            if ((!is_target_thm && ELF_R_TYPE(info) == R_ARM_THM_JUMP24) || overflow) {
                // Generate veneer
-               offset = &(makeArmSymbolExtra(oc, ELF_R_SYM(info), S+offset, 0)->jumpIsland);
-               S = 0;
-            } else if (!is_target_thm) {
+               offset = &(makeArmSymbolExtra(oc, ELF_R_SYM(info), S+imm, 1, is_target_thm)->jumpIsland);
+               offset -= P - 4;
+               offset |= 1; // Set thumb indicator bit
+            } else if (!is_target_thm && ELF_R_TYPE(info) == R_ARM_THM_CALL) {
                *lower &= ~(1<<12);   // Change instruction to BLX
                offset &= ~1;         // Make sure offset is aligned properly
-            }
-
-            offset = ((offset + S) | T) - P;
-            if (offset <= 0xff000000 || offset >= 0x01000000) {
-               errorBelch("%s: Relocation (offset=%08x) out of range\n",
-                     oc->fileName, offset);
-               return 0;
             }
 
             // Reencode instruction
@@ -4438,8 +4433,8 @@ do_Elf_Rel_relocations ( ObjectCode* oc, char* ehdrC,
                    | (sign << 10)
                    | ((offset >> 12) & 0x03ff) );
             *lower = ( (*lower & 0xd000)
-                   | (i1 << 13)
-                   | (i2 << 11)
+                   | (j1 << 13)
+                   | (j2 << 11)
                    | ((offset >> 1) & 0x07ff) );
             break;
          }
@@ -4454,6 +4449,7 @@ do_Elf_Rel_relocations ( ObjectCode* oc, char* ehdrC,
                              | ((*lower & 0x7000) >> 4)
                              | (*lower & 0x00ff);
 
+            offset = (offset ^ 0x8000) - 0x8000; // Sign extend
             offset += S;
             if (ELF_R_TYPE(info) == R_ARM_THM_MOVW_ABS_NC)
                    offset |= T;
