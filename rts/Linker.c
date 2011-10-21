@@ -178,7 +178,7 @@ static pathchar* pathdup(pathchar *path)
 static int ocVerifyImage_ELF    ( ObjectCode* oc );
 static int ocGetNames_ELF       ( ObjectCode* oc );
 static int ocResolve_ELF        ( ObjectCode* oc );
-#if defined(powerpc_HOST_ARCH) || defined(x86_64_HOST_ARCH)
+#if defined(powerpc_HOST_ARCH) || defined(x86_64_HOST_ARCH) || defined(arm_HOST_ARCH)
 static int ocAllocateSymbolExtras_ELF ( ObjectCode* oc );
 #endif
 #elif defined(OBJFORMAT_PEi386)
@@ -2259,7 +2259,7 @@ loadOc( ObjectCode* oc ) {
        IF_DEBUG(linker, debugBelch("loadOc: ocAllocateSymbolExtras_MachO failed\n"));
        return r;
    }
-#  elif defined(OBJFORMAT_ELF) && (defined(powerpc_HOST_ARCH) || defined(x86_64_HOST_ARCH))
+#  elif defined(OBJFORMAT_ELF) && (defined(powerpc_HOST_ARCH) || defined(x86_64_HOST_ARCH) || defined(arm_HOST_ARCH))
    r = ocAllocateSymbolExtras_ELF ( oc );
    if (!r) {
        IF_DEBUG(linker, debugBelch("loadOc: ocAllocateSymbolExtras_ELF failed\n"));
@@ -2464,7 +2464,7 @@ addSection ( ObjectCode* oc, SectionKind kind,
  * them right next to the object code itself.
  */
 
-#if defined(powerpc_HOST_ARCH) || defined(x86_64_HOST_ARCH)
+#if defined(powerpc_HOST_ARCH) || defined(x86_64_HOST_ARCH) || defined(arm_HOST_ARCH)
 
 /*
   ocAllocateSymbolExtras
@@ -2542,6 +2542,10 @@ static int ocAllocateSymbolExtras( ObjectCode* oc, int count, int first )
 
   return 1;
 }
+
+#endif
+
+#if defined(powerpc_HOST_ARCH) || defined(x86_64_HOST_ARCH)
 
 static SymbolExtra* makeSymbolExtra( ObjectCode* oc,
                                      unsigned long symbolNumber,
@@ -4875,7 +4879,7 @@ ocResolve_ELF ( ObjectCode* oc )
  * PowerPC & X86_64 ELF specifics
  */
 
-#if defined(powerpc_HOST_ARCH) || defined(x86_64_HOST_ARCH)
+#if defined(powerpc_HOST_ARCH) || defined(x86_64_HOST_ARCH) || defined(arm_HOST_ARCH)
 
 static int ocAllocateSymbolExtras_ELF( ObjectCode *oc )
 {
