@@ -2545,6 +2545,19 @@ static int ocAllocateSymbolExtras( ObjectCode* oc, int count, int first )
 
 #endif
 
+#if defined(arm_HOST_ARCH)
+
+static void
+ocFlushInstructionCache( ObjectCode *oc )
+{
+    // Object code
+    __clear_cache(oc->image, oc->image + oc->fileSize);
+    // Jump islands
+    __clear_cache(oc->symbol_extras, &oc->symbol_extras[oc->n_symbol_extras]);
+}
+
+#endif
+
 #if defined(powerpc_HOST_ARCH) || defined(x86_64_HOST_ARCH)
 
 static SymbolExtra* makeSymbolExtra( ObjectCode* oc,
@@ -4864,7 +4877,7 @@ ocResolve_ELF ( ObjectCode* oc )
       }
    }
 
-#if defined(powerpc_HOST_ARCH)
+#if defined(powerpc_HOST_ARCH) || defined(arm_HOST_ARCH)
    ocFlushInstructionCache( oc );
 #endif
 
