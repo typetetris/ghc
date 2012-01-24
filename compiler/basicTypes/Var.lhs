@@ -5,6 +5,13 @@
 \section{@Vars@: Variables}
 
 \begin{code}
+{-# OPTIONS -fno-warn-tabs #-}
+-- The above warning supression flag is a temporary kludge.
+-- While working on this module you are encouraged to remove it and
+-- detab the module (please do the detabbing in a separate patch). See
+--     http://hackage.haskell.org/trac/ghc/wiki/Commentary/CodingStyle#TabsvsSpaces
+-- for details
+
 -- |
 -- #name_types#
 -- GHC uses several kinds of name internally:
@@ -32,7 +39,7 @@
 
 module Var (
         -- * The main data type and synonyms
-        Var, TyVar, CoVar, Id, DictId, DFunId, EvVar, EqVar, EvId, IpId,
+        Var, TyVar, CoVar, Id, KindVar, DictId, DFunId, EvVar, EqVar, EvId, IpId,
 
 	-- ** Taking 'Var's apart
 	varName, varUnique, varType, 
@@ -53,20 +60,21 @@ module Var (
 	mustHaveLocalBinding,
 
 	-- ** Constructing 'TyVar's
-	mkTyVar, mkTcTyVar, 
+	mkTyVar, mkTcTyVar, mkKindVar,
 
 	-- ** Taking 'TyVar's apart
         tyVarName, tyVarKind, tcTyVarDetails, setTcTyVarDetails,
 
 	-- ** Modifying 'TyVar's
-	setTyVarName, setTyVarUnique, setTyVarKind
+	setTyVarName, setTyVarUnique, setTyVarKind, updateTyVarKind,
+        updateTyVarKindM
 
     ) where
 
 #include "HsVersions.h"
 #include "Typeable.h"
 
-import {-# SOURCE #-}	TypeRep( Type, Kind )
+import {-# SOURCE #-}	TypeRep( Type, Kind, SuperKind )
 import {-# SOURCE #-}	TcType( TcTyVarDetails, pprTcTyVarDetails )
 import {-# SOURCE #-}	IdInfo( IdDetails, IdInfo, coVarDetails, vanillaIdInfo, pprIdDetails )
 
@@ -76,6 +84,8 @@ import Util
 import FastTypes
 import FastString
 import Outputable
+
+-- import StaticFlags ( opt_SuppressVarKinds )
 
 import Data.Data
 \end{code}
@@ -91,7 +101,10 @@ import Data.Data
 
 \begin{code}
 type Id    = Var       -- A term-level identifier
-type TyVar = Var
+
+type TyVar   = Var     -- Type *or* kind variable
+type KindVar = Var     -- Definitely a kind variable
+     	       	       -- See Note [Kind and type variables]
 
 -- See Note [Evidence: EvIds and CoVars]
 type EvId   = Id        -- Term-level evidence: DictId, IpId, or EqVar
@@ -109,14 +122,23 @@ Note [Evidence: EvIds and CoVars]
 * An EvId (evidence Id) is a *boxed*, term-level evidence variable 
   (dictionary, implicit parameter, or equality).
 
-* DictId, IpId, and EqVar are synonyms when we know what kind of
-  evidence we are talking about.  For example, an EqVar has type (t1 ~ t2).
-
 * A CoVar (coercion variable) is an *unboxed* term-level evidence variable
   of type (t1 ~# t2).  So it's the unboxed version of an EqVar.
 
-* Only CoVars can occur in Coercions (but NB the LCoercion hack; see
-  Note [LCoercions] in Coercion).
+* Only CoVars can occur in Coercions, EqVars appear in TcCoercions.
+
+* DictId, IpId, and EqVar are synonyms when we know what kind of
+  evidence we are talking about.  For example, an EqVar has type (t1 ~ t2).
+
+Note [Kind and type variables]
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+Before kind polymorphism, TyVar were used to mean type variables. Now
+they are use to mean kind *or* type variables. KindVar is used when we
+know for sure that it is a kind variable. In future, we might want to
+go over the whole compiler code to use:
+   - KiTyVar to mean kind or type variables
+   - TyVar   to mean         type variables only
+   - KindVar to mean kind         variables
 
 
 %************************************************************************
@@ -135,7 +157,8 @@ in its @VarDetails@.
 -- | Essentially a typed 'Name', that may also contain some additional information
 -- about the 'Var' and it's use sites.
 data Var
-  = TyVar {
+  = TyVar {  -- type and kind variables
+             -- see Note [Kind and type variables]
 	varName    :: !Name,
 	realUnique :: FastInt,		-- Key for fast comparison
 					-- Identical to the Unique in the name,
@@ -189,6 +212,10 @@ After CoreTidy, top-level LocalIds are turned into GlobalIds
 \begin{code}
 instance Outputable Var where
   ppr var = ppr (varName var) <+> ifPprDebug (brackets (ppr_debug var))
+-- Printing the type on every occurrence is too much!
+--            <+> if (not opt_SuppressVarKinds)
+--                then ifPprDebug (text "::" <+> ppr (tyVarKind var) <+> text ")")
+--                else empty
 
 ppr_debug :: Var -> SDoc
 ppr_debug (TyVar {})                           = ptext (sLit "tv")
@@ -248,7 +275,7 @@ setVarType id ty = id { varType = ty }
 
 %************************************************************************
 %*									*
-\subsection{Type variables}
+\subsection{Type and kind variables}
 %*									*
 %************************************************************************
 
@@ -267,6 +294,14 @@ setTyVarName   = setVarName
 
 setTyVarKind :: TyVar -> Kind -> TyVar
 setTyVarKind tv k = tv {varType = k}
+
+updateTyVarKind :: (Kind -> Kind) -> TyVar -> TyVar
+updateTyVarKind update tv = tv {varType = update (tyVarKind tv)}
+
+updateTyVarKindM :: (Monad m) => (Kind -> m Kind) -> TyVar -> m TyVar
+updateTyVarKindM update tv
+  = do { k' <- update (tyVarKind tv)
+       ; return $ tv {varType = k'} }
 \end{code}
 
 \begin{code}
@@ -291,6 +326,15 @@ tcTyVarDetails var = pprPanic "tcTyVarDetails" (ppr var)
 
 setTcTyVarDetails :: TyVar -> TcTyVarDetails -> TyVar
 setTcTyVarDetails tv details = tv { tc_tv_details = details }
+
+mkKindVar :: Name -> SuperKind -> KindVar
+-- mkKindVar take a SuperKind as argument because we don't have access
+-- to tySuperKind here.
+mkKindVar name kind = TyVar
+  { varName    = name
+  , realUnique = getKeyFastInt (nameUnique name)
+  , varType    = kind }
+
 \end{code}
 
 %************************************************************************

@@ -4,6 +4,13 @@
 \section[SimplCore]{Driver for simplifying @Core@ programs}
 
 \begin{code}
+{-# OPTIONS -fno-warn-tabs #-}
+-- The above warning supression flag is a temporary kludge.
+-- While working on this module you are encouraged to remove it and
+-- detab the module (please do the detabbing in a separate patch). See
+--     http://hackage.haskell.org/trac/ghc/wiki/Commentary/CodingStyle#TabsvsSpaces
+-- for details
+
 module SimplCore ( core2core, simplifyExpr ) where
 
 #include "HsVersions.h"
@@ -184,8 +191,12 @@ getCoreToDo dflags
 
     core_todo =
      if opt_level == 0 then
-       [vectorisation,
-        simpl_phase 0 ["final"] max_iter]
+       [ vectorisation
+       , CoreDoSimplify max_iter
+             (base_mode { sm_phase = Phase 0
+                        , sm_names = ["Non-opt simplification"] }) 
+       ]
+
      else {- opt_level >= 1 -} [
 
     -- We want to do the static argument transform before full laziness as it
@@ -288,7 +299,6 @@ getCoreToDo dflags
         simpl_phase 0 ["final"] max_iter
      ]
 \end{code}
-
 
 Loading plugins
 
@@ -478,12 +488,15 @@ simplifyExpr dflags expr
 
         ; us <-  mkSplitUniqSupply 's'
 
-        ; let sz = exprSize expr
-              (expr', _counts) = initSmpl dflags emptyRuleBase emptyFamInstEnvs us sz $
-                                 simplExprGently (simplEnvForGHCi dflags) expr
+	; let sz = exprSize expr
+              (expr', counts) = initSmpl dflags emptyRuleBase emptyFamInstEnvs us sz $
+				 simplExprGently (simplEnvForGHCi dflags) expr
 
-        ; Err.dumpIfSet_dyn dflags Opt_D_dump_simpl "Simplified expression"
-                        (pprCoreExpr expr')
+	; Err.dumpIfSet (dopt Opt_D_dump_simpl_stats dflags)
+		  "Simplifier statistics" (pprSimplCount counts)
+
+	; Err.dumpIfSet_dyn dflags Opt_D_dump_simpl "Simplified expression"
+			(pprCoreExpr expr')
 
         ; return expr'
         }
@@ -625,7 +638,7 @@ simplifyPgmIO pass@(CoreDoSimplify max_iterations mode)
            case initSmpl dflags rule_base2 fam_envs us1 sz simpl_binds of {
                 (env1, counts1) -> do {
 
-           let  { binds1 = getFloats env1
+           let  { binds1 = getFloatBinds env1
                 ; rules1 = substRulesForImportedIds (mkCoreSubst (text "imp-rules") env1) rules
                 } ;
 
@@ -872,6 +885,7 @@ hasShortableIdInfo :: Id -> Bool
 hasShortableIdInfo id
   =  isEmptySpecInfo (specInfo info)
   && isDefaultInlinePragma (inlinePragInfo info)
+  && not (isStableUnfolding (unfoldingInfo info))
   where
      info = idInfo id
 

@@ -44,7 +44,7 @@ compiler/stage3/package-data.mk : compiler/stage3/build/Config.hs
 endif
 
 compiler/stage%/build/Config.hs : mk/config.mk mk/project.mk | $$(dir $$@)/.
-	"$(RM)" $(RM_OPTS) $@
+	$(call removeFiles,$@)
 	@echo 'Creating $@ ... '
 	@echo '{-# LANGUAGE CPP #-}'                                        >> $@
 	@echo 'module Config where'                                         >> $@
@@ -105,6 +105,8 @@ endif
 	@echo 'cLeadingUnderscore    = "$(LeadingUnderscore)"'              >> $@
 	@echo 'cRAWCPP_FLAGS         :: String'                             >> $@
 	@echo 'cRAWCPP_FLAGS         = "$(RAWCPP_FLAGS)"'                   >> $@
+	@echo 'cLdHasNoCompactUnwind :: String'                             >> $@
+	@echo 'cLdHasNoCompactUnwind = "$(LdHasNoCompactUnwind)"'           >> $@
 	@echo 'cLdIsGNULd            :: String'                             >> $@
 	@echo 'cLdIsGNULd            = "$(LdIsGNULd)"'                      >> $@
 	@echo 'cLdHasBuildId         :: String'                             >> $@
@@ -127,12 +129,6 @@ endif
 	@echo 'cGHC_SYSMAN_DIR       = "$(GHC_SYSMAN_DIR)"'                 >> $@
 	@echo 'cDEFAULT_TMPDIR       :: String'                             >> $@
 	@echo 'cDEFAULT_TMPDIR       = "$(DEFAULT_TMPDIR)"'                 >> $@
-	@echo 'cRelocatableBuild     :: Bool'                               >> $@
-ifeq "$(RelocatableBuild)" "YES"
-	@echo 'cRelocatableBuild     = True'                                >> $@
-else
-	@echo 'cRelocatableBuild     = False'                               >> $@
-endif
 	@echo 'cLibFFI               :: Bool'                               >> $@
 ifeq "$(UseLibFFIForAdjustors)" "YES"
 	@echo 'cLibFFI               = True'                                >> $@
@@ -155,7 +151,7 @@ $(eval $(call clean-target,compiler,config_hs,compiler/main/Config.hs))
 PLATFORM_H = ghc_boot_platform.h
 
 compiler/stage1/$(PLATFORM_H) : mk/config.mk mk/project.mk | $$(dir $$@)/.
-	"$(RM)" $(RM_OPTS) $@
+	$(call removeFiles,$@)
 	@echo "Creating $@..."
 	@echo "#ifndef __PLATFORM_H__"                           >> $@
 	@echo "#define __PLATFORM_H__"                           >> $@
@@ -201,7 +197,7 @@ endif
 # the HOST platform is the TARGET of stage1.  The TARGET remains the same
 # (stage1 is the cross-compiler, not stage2).
 compiler/stage2/$(PLATFORM_H) : mk/config.mk mk/project.mk | $$(dir $$@)/.
-	"$(RM)" $(RM_OPTS) $@
+	$(call removeFiles,$@)
 	@echo "Creating $@..."
 	@echo "#ifndef __PLATFORM_H__"                            >> $@
 	@echo "#define __PLATFORM_H__"                            >> $@
@@ -262,10 +258,8 @@ PRIMOP_BITS = compiler/primop-data-decl.hs-incl        \
               compiler/primop-strictness.hs-incl       \
               compiler/primop-primop-info.hs-incl
 
-compiler_CPP_OPTS += -I$(GHC_INCLUDE_DIR)
+compiler_CPP_OPTS += $(addprefix -I,$(GHC_INCLUDE_DIRS))
 compiler_CPP_OPTS += ${GhcCppOpts}
-
-compiler/stage2/build/LibFFI.hs : $(ffi_HEADER)
 
 $(PRIMOPS_TXT) compiler/parser/Parser.y: %: %.pp compiler/stage1/$(PLATFORM_H)
 	$(CPP) $(RAWCPP_FLAGS) -P $(compiler_CPP_OPTS) -x c $< | grep -v '^#pragma GCC' > $@
@@ -349,12 +343,21 @@ else
 compiler_CONFIGURE_OPTS += --ghc-option=-DNO_REGS
 endif
 
-# If we're profiling GHC then we want lots of SCCs, so -auto-all
-# We also don't want to waste time building the non-profiling library.
-# Unfortunately this means that we have to tell ghc-pkg --force as it
-# gets upset when libHSghc-6.9.a doesn't exist.
 ifeq "$(GhcProfiled)" "YES"
-compiler_stage2_CONFIGURE_OPTS += --ghc-option=-auto-all
+
+# If we're profiling GHC then we want SCCs.  However, adding -auto-all
+# everywhere tends to give a hard-to-read profile, and adds lots of
+# overhead.  A better approach is to proceed top-down; identify the
+# parts of the compiler of interest, and then add further cost centres
+# as necessary.  Turn on -auto-all for individual modules like this:
+
+compiler/main/DriverPipeline_HC_OPTS += -auto-all
+compiler/main/GhcMake_HC_OPTS        += -auto-all
+compiler/main/GHC_HC_OPTS            += -auto-all
+
+# or alternatively addd {-# OPTIONS_GHC -auto-all #-} to the top of
+# modules you're interested in.
+
 # We seem to still build the vanilla libraries even if we say
 # --disable-library-vanilla, but installation then fails, as Cabal
 # doesn't copy the vanilla .hi files, but ghc-pkg complains about
@@ -491,6 +494,19 @@ compiler/main/Constants_HC_OPTS  += -fforce-recomp
 # this for just stage1 in the build system.
 ifeq "$(GhcVersion)" "6.12.2"
 compiler/hsSyn/HsLit_HC_OPTS     += -fomit-interface-pragmas
+endif
+
+# LibFFI.hs #includes ffi.h
+compiler/stage2/build/LibFFI.hs : $(libffi_HEADERS)
+# On Windows it seems we also need to link directly to libffi
+ifeq  "$(HOSTPLATFORM)" "i386-unknown-mingw32"
+define windowsDynLinkToFfi
+# $1 = way
+ifneq "$$(findstring dyn, $1)" ""
+compiler_stage2_$1_ALL_HC_OPTS += -lffi-5
+endif
+endef
+$(foreach way,$(GhcLibWays),$(eval $(call windowsDynLinkToFfi,$(way))))
 endif
 
 # Note [munge-stage1-package-config]

@@ -1,4 +1,11 @@
 \begin{code}
+{-# OPTIONS -fno-warn-tabs #-}
+-- The above warning supression flag is a temporary kludge.
+-- While working on this module you are encouraged to remove it and
+-- detab the module (please do the detabbing in a separate patch). See
+--     http://hackage.haskell.org/trac/ghc/wiki/Commentary/CodingStyle#TabsvsSpaces
+-- for details
+
 -- | Handy functions for creating much Core syntax
 module MkCore (
         -- * Constructing normal syntax
@@ -13,6 +20,9 @@ module MkCore (
         mkIntegerExpr,
         mkFloatExpr, mkDoubleExpr,
         mkCharExpr, mkStringExpr, mkStringExprFS,
+
+        -- * Floats
+        FloatBind(..), wrapFloat,
 
         -- * Constructing/deconstructing implicit parameter boxes
         mkIPUnbox, mkIPBox,
@@ -281,8 +291,10 @@ mkIPUnbox ipx = Var x `Cast` mkAxInstCo (ipCoAxiom ip) [ty]
 \begin{code}
 
 mkEqBox :: Coercion -> CoreExpr
-mkEqBox co = Var (dataConWorkId eqBoxDataCon) `mkTyApps` [ty1, ty2] `App` Coercion co
+mkEqBox co = ASSERT2( typeKind ty2 `eqKind` k, ppr co $$ ppr ty1 $$ ppr ty2 $$ ppr (typeKind ty1) $$ ppr (typeKind ty2) )
+             Var (dataConWorkId eqBoxDataCon) `mkTyApps` [k, ty1, ty2] `App` Coercion co
   where Pair ty1 ty2 = coercionKind co
+        k = typeKind ty1
 
 \end{code}
 
@@ -378,6 +390,25 @@ mkBigCoreTup = mkChunkified mkCoreTup
 -- | Build the type of a big tuple that holds the specified type of thing
 mkBigCoreTupTy :: [Type] -> Type
 mkBigCoreTupTy = mkChunkified mkBoxedTupleTy
+\end{code}
+
+
+%************************************************************************
+%*                                                                      *
+                Floats
+%*                                                                      *
+%************************************************************************
+
+\begin{code}
+data FloatBind 
+  = FloatLet  CoreBind
+  | FloatCase CoreExpr Id AltCon [Var]       
+      -- case e of y { C ys -> ... }
+      -- See Note [Floating cases] in SetLevels
+
+wrapFloat :: FloatBind -> CoreExpr -> CoreExpr
+wrapFloat (FloatLet defns)       body = Let defns body
+wrapFloat (FloatCase e b con bs) body = Case e b (exprType body) [(con, bs, body)]
 \end{code}
 
 %************************************************************************

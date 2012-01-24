@@ -76,6 +76,7 @@ import Foreign
 import Data.Array
 import Data.IORef
 import Data.Char                ( ord, chr )
+import Data.Time
 import Data.Typeable
 #if __GLASGOW_HASKELL__ >= 701
 import Data.Typeable.Internal
@@ -447,20 +448,30 @@ instance (Binary a, Binary b, Binary c) => Binary (a,b,c) where
 
 instance (Binary a, Binary b, Binary c, Binary d) => Binary (a,b,c,d) where
     put_ bh (a,b,c,d) = do put_ bh a; put_ bh b; put_ bh c; put_ bh d
-    get bh          = do a <- get bh
-                         b <- get bh
-                         c <- get bh
-                         d <- get bh
-                         return (a,b,c,d)
+    get bh            = do a <- get bh
+                           b <- get bh
+                           c <- get bh
+                           d <- get bh
+                           return (a,b,c,d)
 
 instance (Binary a, Binary b, Binary c, Binary d, Binary e) => Binary (a,b,c,d, e) where
     put_ bh (a,b,c,d, e) = do put_ bh a; put_ bh b; put_ bh c; put_ bh d; put_ bh e;
-    get bh          = do a <- get bh
-                         b <- get bh
-                         c <- get bh
-                         d <- get bh
-                         e <- get bh
-                         return (a,b,c,d,e)
+    get bh               = do a <- get bh
+                              b <- get bh
+                              c <- get bh
+                              d <- get bh
+                              e <- get bh
+                              return (a,b,c,d,e)
+
+instance (Binary a, Binary b, Binary c, Binary d, Binary e, Binary f) => Binary (a,b,c,d, e, f) where
+    put_ bh (a,b,c,d, e, f) = do put_ bh a; put_ bh b; put_ bh c; put_ bh d; put_ bh e; put_ bh f;
+    get bh                  = do a <- get bh
+                                 b <- get bh
+                                 c <- get bh
+                                 d <- get bh
+                                 e <- get bh
+                                 f <- get bh
+                                 return (a,b,c,d,e,f)
 
 instance Binary a => Binary (Maybe a) where
     put_ bh Nothing  = putByte bh 0
@@ -477,6 +488,23 @@ instance (Binary a, Binary b) => Binary (Either a b) where
                            case h of
                              0 -> do a <- get bh ; return (Left a)
                              _ -> do b <- get bh ; return (Right b)
+
+instance Binary UTCTime where
+    put_ bh u = do put_ bh (utctDay u)
+                   put_ bh (utctDayTime u)
+    get bh = do day <- get bh
+                dayTime <- get bh
+                return $ UTCTime { utctDay = day, utctDayTime = dayTime }
+
+instance Binary Day where
+    put_ bh d = put_ bh (toModifiedJulianDay d)
+    get bh = do i <- get bh
+                return $ ModifiedJulianDay { toModifiedJulianDay = i }
+
+instance Binary DiffTime where
+    put_ bh dt = put_ bh (toRational dt)
+    get bh = do r <- get bh
+                return $ fromRational r
 
 #if defined(__GLASGOW_HASKELL__) || 1
 --to quote binary-0.3 on this code idea,

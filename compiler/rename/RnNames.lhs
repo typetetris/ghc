@@ -35,14 +35,14 @@ import ErrUtils
 import Util
 import FastString
 import ListSetOps
-import Data.List        ( partition, (\\), find )
-import qualified Data.Set as Set
-import System.IO
+
 import Control.Monad
 import Data.Map         ( Map )
 import qualified Data.Map as Map
+import Data.List        ( partition, (\\), find )
+import qualified Data.Set as Set
+import System.IO
 \end{code}
-
 
 
 %************************************************************************
@@ -60,12 +60,14 @@ and packages. Doing this without caching any trust information would be very
 slow as we would need to touch all packages and interface files a module depends
 on. To avoid this we make use of the property that if a modules Safe Haskell
 mode changes, this triggers a recompilation from that module in the dependcy
-graph. So we can just worry mostly about direct imports. There is one trust
-property that can change for a package though without recompliation being
-triggered, package trust. So we must check that all packages a module
-tranitively depends on to be trusted are still trusted when we are compiling
-this module (as due to recompilation avoidance some modules below may not be
-considered trusted any more without recompilation being triggered).
+graph. So we can just worry mostly about direct imports.
+
+There is one trust property that can change for a package though without
+recompliation being triggered: package trust. So we must check that all
+packages a module tranitively depends on to be trusted are still trusted when
+we are compiling this module (as due to recompilation avoidance some modules
+below may not be considered trusted any more without recompilation being
+triggered).
 
 We handle this by augmenting the existing transitive list of packages a module M
 depends on with a bool for each package that says if it must be trusted when the
@@ -110,7 +112,7 @@ haskell at all and simply imports B, should A inherit all the the trust
 requirements from B? Should A now also require that a package p is trusted since
 B required it?
 
-We currently say no but I saying yes also makes sense. The difference is, if a
+We currently say no but saying yes also makes sense. The difference is, if a
 module M that doesn't use Safe Haskell imports a module N that does, should all
 the trusted package requirements be dropped since M didn't declare that it cares
 about Safe Haskell (so -XSafe is more strongly associated with the module doing
@@ -130,39 +132,35 @@ with yes we have gone with no for now.
 
 
 \begin{code}
+-- | Process Import Decls
+-- Do the non SOURCE ones first, so that we get a helpful warning for SOURCE
+-- ones that are unnecessary
 rnImports :: [LImportDecl RdrName]
           -> RnM ([LImportDecl Name], GlobalRdrEnv, ImportAvails, AnyHpcUsage)
+rnImports imports = do
+    this_mod <- getModule
+    let (source, ordinary) = partition is_source_import imports
+        is_source_import d = ideclSource (unLoc d)
+    stuff1 <- mapM (rnImportDecl this_mod) ordinary
+    stuff2 <- mapM (rnImportDecl this_mod) source
+    -- Safe Haskell: See Note [Tracking Trust Transitively]
+    let (decls, rdr_env, imp_avails, hpc_usage) = combine (stuff1 ++ stuff2)
+    return (decls, rdr_env, imp_avails, hpc_usage)
 
-rnImports imports
-         -- PROCESS IMPORT DECLS
-         -- Do the non {- SOURCE -} ones first, so that we get a helpful
-         -- warning for {- SOURCE -} ones that are unnecessary
-    = do this_mod <- getModule
-         let (source, ordinary) = partition is_source_import imports
-             is_source_import d = ideclSource (unLoc d)
-         stuff1 <- mapM (rnImportDecl this_mod) ordinary
-         stuff2 <- mapM (rnImportDecl this_mod) source
-         -- Safe Haskell: See Note [Tracking Trust Transitively]
-         let (decls, rdr_env, imp_avails, hpc_usage) = 
-                        combine (stuff1 ++ stuff2)
-         return (decls, rdr_env, imp_avails, hpc_usage)
+  where
+    combine :: [(LImportDecl Name,  GlobalRdrEnv, ImportAvails, AnyHpcUsage)]
+            -> ([LImportDecl Name], GlobalRdrEnv, ImportAvails, AnyHpcUsage)
+    combine = foldr plus ([], emptyGlobalRdrEnv, emptyImportAvails, False)
+    
+    plus (decl,  gbl_env1, imp_avails1,hpc_usage1)
+         (decls, gbl_env2, imp_avails2,hpc_usage2)
+      = ( decl:decls,
+          gbl_env1 `plusGlobalRdrEnv` gbl_env2,
+          imp_avails1 `plusImportAvails` imp_avails2,
+          hpc_usage1 || hpc_usage2 )
 
-    where
-      combine :: [(LImportDecl Name,  GlobalRdrEnv, ImportAvails, AnyHpcUsage)]
-              -> ([LImportDecl Name], GlobalRdrEnv, ImportAvails, AnyHpcUsage)
-      combine = foldr plus ([], emptyGlobalRdrEnv, emptyImportAvails, False)
-        where
-          plus (decl,  gbl_env1, imp_avails1,hpc_usage1)
-               (decls, gbl_env2, imp_avails2,hpc_usage2)
-            = ( decl:decls,
-                gbl_env1 `plusGlobalRdrEnv` gbl_env2,
-                imp_avails1 `plusImportAvails` imp_avails2,
-                hpc_usage1 || hpc_usage2 )
-
-rnImportDecl  :: Module
-              -> LImportDecl RdrName
+rnImportDecl  :: Module -> LImportDecl RdrName
               -> RnM (LImportDecl Name, GlobalRdrEnv, ImportAvails, AnyHpcUsage)
-
 rnImportDecl this_mod 
              (L loc decl@(ImportDecl { ideclName = loc_imp_mod_name, ideclPkgQual = mb_pkg
                                      , ideclSource = want_boot, ideclSafe = mod_safe
@@ -174,15 +172,13 @@ rnImportDecl this_mod
         pkg_imports <- xoptM Opt_PackageImports
         when (not pkg_imports) $ addErr packageImportErr
 
-        -- If there's an error in loadInterface, (e.g. interface
-        -- file not found) we get lots of spurious errors from 'filterImports'
-    let
-        imp_mod_name = unLoc loc_imp_mod_name
+    -- If there's an error in loadInterface, (e.g. interface
+    -- file not found) we get lots of spurious errors from 'filterImports'
+    let imp_mod_name = unLoc loc_imp_mod_name
         doc = ppr imp_mod_name <+> ptext (sLit "is directly imported")
 
-        -- Check for a missing import list
-        -- (Opt_WarnMissingImportList also checks for T(..) items
-        --  but that is done in checkDodgyImport below)
+    -- Check for a missing import list (Opt_WarnMissingImportList also
+    -- checks for T(..) items but that is done in checkDodgyImport below)
     case imp_details of
         Just (False, _) -> return () -- Explicit import list
         _  | implicit   -> return () -- Do not bleat for implicit imports
@@ -192,24 +188,27 @@ rnImportDecl this_mod
 
     iface <- loadSrcInterface doc imp_mod_name want_boot mb_pkg
 
-        -- Compiler sanity check: if the import didn't say
-        -- {-# SOURCE #-} we should not get a hi-boot file
-    WARN( not want_boot && mi_boot iface, ppr imp_mod_name ) (do
+    -- Compiler sanity check: if the import didn't say
+    -- {-# SOURCE #-} we should not get a hi-boot file
+    WARN( not want_boot && mi_boot iface, ppr imp_mod_name ) do
 
-        -- Issue a user warning for a redundant {- SOURCE -} import
-        -- NB that we arrange to read all the ordinary imports before
-        -- any of the {- SOURCE -} imports.
-        --
-        -- in --make and GHCi, the compilation manager checks for this,
-        -- and indeed we shouldn't do it here because the existence of
-        -- the non-boot module depends on the compilation order, which
-        -- is not deterministic.  The hs-boot test can show this up.
-    dflags <- getDOpts
+    -- Issue a user warning for a redundant {- SOURCE -} import
+    -- NB that we arrange to read all the ordinary imports before
+    -- any of the {- SOURCE -} imports.
+    --
+    -- in --make and GHCi, the compilation manager checks for this,
+    -- and indeed we shouldn't do it here because the existence of
+    -- the non-boot module depends on the compilation order, which
+    -- is not deterministic.  The hs-boot test can show this up.
+    dflags <- getDynFlags
     warnIf (want_boot && not (mi_boot iface) && isOneShot (ghcMode dflags))
            (warnRedundantSourceImport imp_mod_name)
+    when (mod_safe && not (safeImportsOn dflags)) $
+        addErrAt loc (ptext (sLit "safe import can't be used as Safe Haskell isn't on!")
+                  $+$ ptext (sLit $ "please enable Safe Haskell through either"
+                                 ++ "-XSafe, -XTruswrothy or -XUnsafe"))
 
-    let
-        imp_mod    = mi_module iface
+    let imp_mod    = mi_module iface
         warns      = mi_warns iface
         orph_iface = mi_orphan iface
         has_finsts = mi_finsts iface
@@ -217,9 +216,7 @@ rnImportDecl this_mod
         trust      = getSafeMode $ mi_trust iface
         trust_pkg  = mi_trust_pkg iface
 
-        qual_mod_name = case as_mod of
-                          Nothing           -> imp_mod_name
-                          Just another_name -> another_name
+        qual_mod_name = as_mod `orElse` imp_mod_name
         imp_spec  = ImpDeclSpec { is_mod = imp_mod_name, is_qual = qual_only,
                                   is_dloc = loc, is_as = qual_mod_name }
 
@@ -308,18 +305,18 @@ rnImportDecl this_mod
                         -- module as a safe import.
                         -- See Note [Tracking Trust Transitively]
                         -- and Note [Trust Transitive Property]
-                        imp_trust_pkgs = if mod_safe' 
-                                            then map fst $ filter snd dependent_pkgs
-                                            else [],
+                        imp_trust_pkgs = if mod_safe'
+                                             then map fst $ filter snd dependent_pkgs
+                                             else [],
                         -- Do we require our own pkg to be trusted?
                         -- See Note [Trust Own Package]
                         imp_trust_own_pkg = pkg_trust_req
                    }
 
     -- Complain if we import a deprecated module
-    ifWOptM Opt_WarnWarningsDeprecations        (
+    ifWOptM Opt_WarnWarningsDeprecations (
        case warns of
-          WarnAll txt -> addWarn (moduleWarn imp_mod_name txt)
+          WarnAll txt -> addWarn $ moduleWarn imp_mod_name txt
           _           -> return ()
      )
 
@@ -327,7 +324,6 @@ rnImportDecl this_mod
                                    , ideclHiding = new_imp_details })
 
     return (new_imp_decl, gbl_env, imports, mi_hpc iface)
-    )
 
 warnRedundantSourceImport :: ModuleName -> SDoc
 warnRedundantSourceImport mod_name
@@ -497,25 +493,25 @@ getLocalNonValBinders fixity_env
           -- Process all type/class decls *except* family instances
         ; tc_avails <- mapM new_tc tycl_decls_noinsts
         ; envs <- extendGlobalRdrEnvRn tc_avails fixity_env
-	; setEnvs envs $ do {
-	    -- Bring these things into scope first
+        ; setEnvs envs $ do {
+            -- Bring these things into scope first
             -- See Note [Looking up family names in family instances]
 
           -- Process all family instances
-	  -- to bring new data constructors into scope
+          -- to bring new data constructors into scope
         ; ti_avails  <- mapM (new_ti Nothing) tyinst_decls
         ; nti_avails <- concatMapM new_assoc inst_decls
 
           -- Finish off with value binders:
-	  --    foreign decls for an ordinary module
-	  --    type sigs in case of a hs-boot file only
+          --    foreign decls for an ordinary module
+          --    type sigs in case of a hs-boot file only
         ; is_boot <- tcIsHsBoot 
         ; let val_bndrs | is_boot   = hs_boot_sig_bndrs
                         | otherwise = for_hs_bndrs
         ; val_avails <- mapM new_simple val_bndrs
 
-	; let avails    = ti_avails ++ nti_avails ++ val_avails
-	      new_bndrs = availsToNameSet avails `unionNameSets` 
+        ; let avails    = ti_avails ++ nti_avails ++ val_avails
+              new_bndrs = availsToNameSet avails `unionNameSets` 
                           availsToNameSet tc_avails
         ; envs <- extendGlobalRdrEnvRn avails fixity_env 
         ; return (envs, new_bndrs) } }
@@ -558,14 +554,14 @@ lookupTcdName :: Maybe Name -> TyClDecl RdrName -> RnM (Located Name)
 -- Used for TyData and TySynonym only
 -- See Note [Family instance binders]
 lookupTcdName mb_cls tc_decl
-  | not (isFamInstDecl tc_decl)	  -- The normal case
-  = ASSERT2( isNothing mb_cls, ppr tc_rdr )	-- Parser prevents this
+  | not (isFamInstDecl tc_decl)   -- The normal case
+  = ASSERT2( isNothing mb_cls, ppr tc_rdr )     -- Parser prevents this
     lookupLocatedTopBndrRn tc_rdr
 
-  | Just cls <- mb_cls	    -- Associated type; c.f RnBinds.rnMethodBind
+  | Just cls <- mb_cls      -- Associated type; c.f RnBinds.rnMethodBind
   = wrapLocM (lookupInstDeclBndr cls (ptext (sLit "associated type"))) tc_rdr
 
-  | otherwise		    -- Family instance; tc_rdr is an *occurrence*
+  | otherwise               -- Family instance; tc_rdr is an *occurrence*
   = lookupLocatedOccRn tc_rdr 
   where
     tc_rdr = tcdLName tc_decl
@@ -729,9 +725,9 @@ filterImports iface decl_spec (Just (want_hiding, import_items))
         -- data constructors of an associated family, we need separate
         -- AvailInfos for the data constructors and the family (as they have
         -- different parents).  See the discussion at occ_env.
-    lookup_ie :: Bool -> IE RdrName -> MaybeErr Message [(IE Name,AvailInfo)]
+    lookup_ie :: Bool -> IE RdrName -> MaybeErr MsgDoc [(IE Name,AvailInfo)]
     lookup_ie opt_typeFamilies ie
-      = let bad_ie :: MaybeErr Message a
+      = let bad_ie :: MaybeErr MsgDoc a
             bad_ie = Failed (badImportItemErr iface decl_spec ie all_avails)
 
             lookup_name rdr
@@ -907,7 +903,7 @@ it re-exports @GHC@, which includes @takeMVar#@, whose type includes
 Note [Exports of data families]
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 Suppose you see (Trac #5306)
-	module M where
+        module M where
           import X( F )
           data instance F Int = FInt
 What does M export?  AvailTC F [FInt] 
@@ -968,7 +964,7 @@ rnExports explicit_mod exports
         -- written "module Main where ..."
         -- Reason: don't want to complain about 'main' not in scope
         --         in interactive mode
-        ; dflags <- getDOpts
+        ; dflags <- getDynFlags
         ; let real_exports
                  | explicit_mod = exports
                  | ghcLink dflags == LinkInMemory = Nothing
@@ -1035,8 +1031,8 @@ exports_from_avail (Just rdr_items) rdr_env imports this_mod
              ; warnDodgyExports <- woptM Opt_WarnDodgyExports
              ; let { exportValid = (mod `elem` imported_modules)
                                 || (moduleName this_mod == mod)
-		   ; gres = filter (isModuleExported implicit_prelude mod)
-		     	           (globalRdrEnvElts rdr_env)
+                   ; gres = filter (isModuleExported implicit_prelude mod)
+                                   (globalRdrEnvElts rdr_env)
                    ; new_exports = map greExportAvail gres
                    ; names       = map gre_name gres }
 
@@ -1412,9 +1408,9 @@ warnUnusedImportDecls gbl_env
     explicit_import (L _ decl) = unLoc (ideclName decl) /= pRELUDE_NAME
         -- Filter out the implicit Prelude import
         -- which we do not want to bleat about
-	-- This also filters out an *explicit* Prelude import
-	-- but solving that problem involves more plumbing, and
-	-- it just doesn't seem worth it
+        -- This also filters out an *explicit* Prelude import
+        -- but solving that problem involves more plumbing, and
+        -- it just doesn't seem worth it
 \end{code}
 
 \begin{code}
@@ -1641,7 +1637,7 @@ badImportItemErrDataCon dataType iface decl_spec ie
     datacon = parenSymOcc datacon_occ (ppr datacon_occ) 
     source_import | mi_boot iface = ptext (sLit "(hi-boot interface)")
                   | otherwise     = empty
-    parens_sp d = parens (space <> d <> space)	-- T( f,g )
+    parens_sp d = parens (space <> d <> space)  -- T( f,g )
 
 badImportItemErr :: ModIface -> ImpDeclSpec -> IE RdrName -> [AvailInfo] -> SDoc
 badImportItemErr iface decl_spec ie avails
@@ -1684,7 +1680,7 @@ typeItemErr name wherestr
           ptext (sLit "Use -XTypeFamilies to enable this extension") ]
 
 exportClashErr :: GlobalRdrEnv -> Name -> Name -> IE RdrName -> IE RdrName
-               -> Message
+               -> MsgDoc
 exportClashErr global_env name1 name2 ie1 ie2
   = vcat [ ptext (sLit "Conflicting exports for") <+> quotes (ppr occ) <> colon
          , ppr_export ie1' name1'

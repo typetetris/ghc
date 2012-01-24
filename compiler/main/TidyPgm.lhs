@@ -4,6 +4,13 @@
 \section{Tidying up Core}
 
 \begin{code}
+{-# OPTIONS -fno-warn-tabs #-}
+-- The above warning supression flag is a temporary kludge.
+-- While working on this module you are encouraged to remove it and
+-- detab the module (please do the detabbing in a separate patch). See
+--     http://hackage.haskell.org/trac/ghc/wiki/Commentary/CodingStyle#TabsvsSpaces
+-- for details
+
 module TidyPgm (
        mkBootModDetailsTc, tidyProgram, globaliseAndTidyId
    ) where
@@ -122,7 +129,6 @@ mkBootModDetailsTc hsc_env
         TcGblEnv{ tcg_exports   = exports,
                   tcg_type_env  = type_env, -- just for the Ids
                   tcg_tcs       = tcs,
-                  tcg_clss      = clss,
                   tcg_insts     = insts,
                   tcg_fam_insts = fam_insts
                 }
@@ -132,7 +138,7 @@ mkBootModDetailsTc hsc_env
 	; let { insts'     = tidyInstances globaliseAndTidyId insts
 	      ; dfun_ids   = map instanceDFunId insts'
               ; type_env1  = mkBootTypeEnv (availsToNameSet exports)
-                                (typeEnvIds type_env) tcs clss fam_insts
+                                (typeEnvIds type_env) tcs fam_insts
 	      ; type_env'  = extendTypeEnvWithIds type_env1 dfun_ids
 	      }
 	; return (ModDetails { md_types     = type_env'
@@ -146,10 +152,10 @@ mkBootModDetailsTc hsc_env
 	}
   where
 
-mkBootTypeEnv :: NameSet -> [Id] -> [TyCon] -> [Class] -> [FamInst] -> TypeEnv
-mkBootTypeEnv exports ids tcs clss fam_insts
+mkBootTypeEnv :: NameSet -> [Id] -> [TyCon] -> [FamInst] -> TypeEnv
+mkBootTypeEnv exports ids tcs fam_insts
   = tidyTypeEnv True False exports $
-       typeEnvFromEntities final_ids tcs clss fam_insts
+       typeEnvFromEntities final_ids tcs fam_insts
   where
         -- Find the LocalIds in the type env that are exported
 	-- Make them into GlobalIds, and tidy their types
@@ -287,7 +293,6 @@ tidyProgram :: HscEnv -> ModGuts -> IO (CgGuts, ModDetails)
 tidyProgram hsc_env  (ModGuts { mg_module    = mod
                               , mg_exports   = exports
                               , mg_tcs       = tcs
-                              , mg_clss      = clss
                               , mg_insts     = insts
                               , mg_fam_insts = fam_insts
                               , mg_binds     = binds
@@ -307,7 +312,7 @@ tidyProgram hsc_env  (ModGuts { mg_module    = mod
               }
         ; showPass dflags CoreTidy
 
-        ; let { type_env = typeEnvFromEntities [] tcs clss fam_insts
+        ; let { type_env = typeEnvFromEntities [] tcs fam_insts
 
               ; implicit_binds
                   = concatMap getClassImplicitBinds (typeEnvClasses type_env) ++
@@ -483,7 +488,7 @@ mustExposeTyCon exports tc
     exported_con con = any (`elemNameSet` exports) 
 			   (dataConName con : dataConFieldLabels con)
 
-tidyInstances :: (DFunId -> DFunId) -> [Instance] -> [Instance]
+tidyInstances :: (DFunId -> DFunId) -> [ClsInst] -> [ClsInst]
 tidyInstances tidy_dfun ispecs
   = map tidy ispecs
   where
@@ -494,28 +499,22 @@ tidyInstances tidy_dfun ispecs
 \begin{code}
 tidyVectInfo :: TidyEnv -> VectInfo -> VectInfo
 tidyVectInfo (_, var_env) info@(VectInfo { vectInfoVar          = vars
-                                         , vectInfoPADFun       = pas
-                                         , vectInfoIso          = isos
                                          , vectInfoScalarVars   = scalarVars
                                          })
   = info { vectInfoVar          = tidy_vars
-         , vectInfoPADFun       = tidy_pas
-         , vectInfoIso          = tidy_isos 
          , vectInfoScalarVars   = tidy_scalarVars
          }
   where
-      -- we only export mappings whose co-domain is exported (otherwise, the iface is inconsistent)
+      -- we only export mappings whose domain and co-domain is exported (otherwise, the iface is
+      -- inconsistent)
     tidy_vars = mkVarEnv [ (tidy_var, (tidy_var, tidy_var_v))
                          | (var, var_v) <- varEnvElts vars
                          , let tidy_var   = lookup_var var
                                tidy_var_v = lookup_var var_v
+                         , isExportedId tidy_var
                          , isExportedId tidy_var_v
+                         , isDataConWorkId var || not (isImplicitId var)
                          ]
-
-    tidy_pas  = mapNameEnv tidy_snd_var pas
-    tidy_isos = mapNameEnv tidy_snd_var isos
-
-    tidy_snd_var (x, var) = (x, lookup_var var)
 
     tidy_scalarVars = mkVarSet [ lookup_var var 
                                | var <- varSetElems scalarVars
@@ -794,7 +793,8 @@ dffvExpr :: CoreExpr -> DFFV ()
 dffvExpr (Var v)              = insert v
 dffvExpr (App e1 e2) 	      = dffvExpr e1 >> dffvExpr e2
 dffvExpr (Lam v e)   	      = extendScope v (dffvExpr e)
-dffvExpr (Note _ e)  	      = dffvExpr e
+dffvExpr (Tick (Breakpoint _ ids) e) = mapM_ insert ids >> dffvExpr e
+dffvExpr (Tick _other e)    = dffvExpr e
 dffvExpr (Cast e _)  	      = dffvExpr e
 dffvExpr (Let (NonRec x r) e) = dffvBind (x,r) >> extendScope x (dffvExpr e)
 dffvExpr (Let (Rec prs) e)    = extendScopeList (map fst prs) $
@@ -1205,7 +1205,7 @@ cafRefsE p (App f a) 	       = fastOr (cafRefsE p f) (cafRefsE p) a
 cafRefsE p (Lam _ e) 	       = cafRefsE p e
 cafRefsE p (Let b e) 	       = fastOr (cafRefsEs p (rhssOfBind b)) (cafRefsE p) e
 cafRefsE p (Case e _bndr _ alts) = fastOr (cafRefsE p e) (cafRefsEs p) (rhssOfAlts alts)
-cafRefsE p (Note _n e) 	       = cafRefsE p e
+cafRefsE p (Tick _n e)         = cafRefsE p e
 cafRefsE p (Cast e _co)         = cafRefsE p e
 cafRefsE _ (Type _) 	       = fastBool False
 cafRefsE _ (Coercion _)         = fastBool False

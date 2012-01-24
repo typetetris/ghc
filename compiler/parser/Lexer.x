@@ -145,7 +145,7 @@ haskell :-
 
 -- everywhere: skip whitespace and comments
 $white_no_nl+ ;
-$tab+         { warn Opt_WarnTabs (text "Warning: Tab character") }
+$tab+         { warn Opt_WarnTabs (text "Tab character") }
 
 -- Everywhere: deal with nested comments.  We explicitly rule out
 -- pragmas, "{-#", so that we don't accidentally treat them as comments.
@@ -457,6 +457,7 @@ data Token
   | ITunsafe
   | ITstdcallconv
   | ITccallconv
+  | ITcapiconv
   | ITprimcallconv
   | ITmdo
   | ITfamily
@@ -477,6 +478,7 @@ data Token
   | ITgenerated_prag
   | ITcore_prag                 -- hdaume: core annotations
   | ITunpack_prag
+  | ITnounpack_prag
   | ITann_prag
   | ITclose_prag
   | IToptions_prag String
@@ -507,8 +509,6 @@ data Token
 
   | ITocurly                    -- special symbols
   | ITccurly
-  | ITocurlybar                 -- {|, for type applications
-  | ITccurlybar                 -- |}, for type applications
   | ITvocurly
   | ITvccurly
   | ITobrack
@@ -523,6 +523,7 @@ data Token
   | ITcomma
   | ITunderscore
   | ITbackquote
+  | ITsimpleQuote               --  '
 
   | ITvarid   FastString        -- identifiers
   | ITconid   FastString
@@ -557,7 +558,6 @@ data Token
   | ITcloseQuote                --  |]
   | ITidEscape   FastString     --  $x
   | ITparenEscape               --  $(
-  | ITvarQuote                  --  '
   | ITtyQuote                   --  ''
   | ITquasiQuote (FastString,FastString,RealSrcSpan) --  [:...|...|]
 
@@ -584,9 +584,7 @@ data Token
   | ITlineComment     String     -- comment starting by "--"
   | ITblockComment    String     -- comment in {- -}
 
-#ifdef DEBUG
-  deriving Show -- debugging
-#endif
+  deriving Show
 
 -- the bitmap provided as the third component indicates whether the
 -- corresponding extension keyword is valid under the extension options
@@ -643,6 +641,7 @@ reservedWordsFM = listToUFM $
          ( "unsafe",         ITunsafe,        bit ffiBit),
          ( "stdcall",        ITstdcallconv,   bit ffiBit),
          ( "ccall",          ITccallconv,     bit ffiBit),
+         ( "capi",           ITcapiconv,      bit cApiFfiBit),
          ( "prim",           ITprimcallconv,  bit ffiBit),
 
          ( "rec",            ITrec,           bit recBit),
@@ -786,7 +785,7 @@ ifExtension pred bits _ _ _ = pred bits
 multiline_doc_comment :: Action
 multiline_doc_comment span buf _len = withLexedDocType (worker "")
   where
-    worker commentAcc input docType oneLine = case alexGetChar input of
+    worker commentAcc input docType oneLine = case alexGetChar' input of
       Just ('\n', input')
         | oneLine -> docCommentEnd input commentAcc docType buf span
         | otherwise -> case checkIfCommentLine input' of
@@ -797,15 +796,15 @@ multiline_doc_comment span buf _len = withLexedDocType (worker "")
 
     checkIfCommentLine input = check (dropNonNewlineSpace input)
       where
-        check input = case alexGetChar input of
-          Just ('-', input) -> case alexGetChar input of
-            Just ('-', input) -> case alexGetChar input of
+        check input = case alexGetChar' input of
+          Just ('-', input) -> case alexGetChar' input of
+            Just ('-', input) -> case alexGetChar' input of
               Just (c, _) | c /= '-' -> Just input
               _ -> Nothing
             _ -> Nothing
           _ -> Nothing
 
-        dropNonNewlineSpace input = case alexGetChar input of
+        dropNonNewlineSpace input = case alexGetChar' input of
           Just (c, input')
             | isSpace c && c /= '\n' -> dropNonNewlineSpace input'
             | otherwise -> input
@@ -830,13 +829,13 @@ nested_comment cont span _str _len = do
                                if b
                                  then docCommentEnd input commentAcc ITblockComment _str span
                                  else cont
-    go commentAcc n input = case alexGetChar input of
+    go commentAcc n input = case alexGetChar' input of
       Nothing -> errBrace input span
-      Just ('-',input) -> case alexGetChar input of
+      Just ('-',input) -> case alexGetChar' input of
         Nothing  -> errBrace input span
         Just ('\125',input) -> go commentAcc (n-1) input
         Just (_,_)          -> go ('-':commentAcc) n input
-      Just ('\123',input) -> case alexGetChar input of
+      Just ('\123',input) -> case alexGetChar' input of
         Nothing  -> errBrace input span
         Just ('-',input) -> go ('-':'\123':commentAcc) (n+1) input
         Just (_,_)       -> go ('\123':commentAcc) n input
@@ -845,14 +844,14 @@ nested_comment cont span _str _len = do
 nested_doc_comment :: Action
 nested_doc_comment span buf _len = withLexedDocType (go "")
   where
-    go commentAcc input docType _ = case alexGetChar input of
+    go commentAcc input docType _ = case alexGetChar' input of
       Nothing -> errBrace input span
-      Just ('-',input) -> case alexGetChar input of
+      Just ('-',input) -> case alexGetChar' input of
         Nothing -> errBrace input span
         Just ('\125',input) ->
           docCommentEnd input commentAcc docType buf span
         Just (_,_) -> go ('-':commentAcc) input docType False
-      Just ('\123', input) -> case alexGetChar input of
+      Just ('\123', input) -> case alexGetChar' input of
         Nothing  -> errBrace input span
         Just ('-',input) -> do
           setInput input
@@ -873,7 +872,7 @@ withLexedDocType lexDocComment = do
     '#' -> lexDocComment input ITdocOptionsOld False
     _ -> panic "withLexedDocType: Bad doc type"
  where
-    lexDocSection n input = case alexGetChar input of
+    lexDocSection n input = case alexGetChar' input of
       Just ('*', input) -> lexDocSection (n+1) input
       Just (_,   _)     -> lexDocComment input (ITdocSection n) True
       Nothing -> do setInput input; lexToken -- eof reached, lex it normally
@@ -1127,9 +1126,22 @@ setLine code span buf len = do
 
 setFile :: Int -> Action
 setFile code span buf len = do
-  let file = lexemeToFastString (stepOn buf) (len-2)
+  let file = mkFastString (go (lexemeToString (stepOn buf) (len-2)))
+        where go ('\\':c:cs) = c : go cs
+              go (c:cs)      = c : go cs
+              go []          = []
+              -- decode escapes in the filename.  e.g. on Windows
+              -- when our filenames have backslashes in, gcc seems to
+              -- escape the backslashes.  One symptom of not doing this
+              -- is that filenames in error messages look a bit strange:
+              --   C:\\foo\bar.hs
+              -- only the first backslash is doubled, because we apply
+              -- System.FilePath.normalise before printing out
+              -- filenames and it does not remove duplicate
+              -- backslashes after the drive letter (should it?).
   setAlrLastLoc $ alrInitialLoc file
   setSrcLoc (mkRealSrcLoc file (srcSpanEndLine span) (srcSpanEndCol span))
+  addSrcFile file
   _ <- popLexState
   pushLexState code
   lexToken
@@ -1230,7 +1242,7 @@ lex_stringgap s = do
 lex_char_tok :: Action
 -- Here we are basically parsing character literals, such as 'x' or '\n'
 -- but, when Template Haskell is on, we additionally spot
--- 'x and ''T, returning ITvarQuote and ITtyQuote respectively,
+-- 'x and ''T, returning ITsimpleQuote and ITtyQuote respectively,
 -- but WITHOUT CONSUMING the x or T part  (the parser does that).
 -- So we have to do two characters of lookahead: when we see 'x we need to
 -- see if there's a trailing quote
@@ -1241,11 +1253,8 @@ lex_char_tok span _buf _len = do        -- We've seen '
         Nothing -> lit_error  i1
 
         Just ('\'', i2@(AI end2 _)) -> do       -- We've seen ''
-                  th_exts <- extension thEnabled
-                  if th_exts then do
-                        setInput i2
-                        return (L (mkRealSrcSpan loc end2)  ITtyQuote)
-                   else lit_error i1
+                   setInput i2
+                   return (L (mkRealSrcSpan loc end2)  ITtyQuote)
 
         Just ('\\', i2@(AI _end2 _)) -> do      -- We've seen 'backslash
                   setInput i2
@@ -1268,10 +1277,8 @@ lex_char_tok span _buf _len = do        -- We've seen '
                 _other -> do            -- We've seen 'x not followed by quote
                                         -- (including the possibility of EOF)
                                         -- If TH is on, just parse the quote only
-                        th_exts <- extension thEnabled
                         let (AI end _) = i1
-                        if th_exts then return (L (mkRealSrcSpan loc end) ITvarQuote)
-                                   else lit_error i2
+                        return (L (mkRealSrcSpan loc end) ITsimpleQuote)
 
 finish_char_tok :: RealSrcLoc -> Char -> P (RealLocated Token)
 finish_char_tok loc ch  -- We've already seen the closing quote
@@ -1475,7 +1482,7 @@ data ParseResult a
         SrcSpan         -- The start and end of the text span related to
                         -- the error.  Might be used in environments which can
                         -- show this span, e.g. by highlighting it.
-        Message         -- The error message
+        MsgDoc          -- The error message
 
 data PState = PState {
         buffer     :: StringBuffer,
@@ -1488,6 +1495,7 @@ data PState = PState {
                                    -- extensions
         context    :: [LayoutContext],
         lex_state  :: [Int],
+        srcfiles   :: [FastString],
         -- Used in the alternative layout rule:
         -- These tokens are the next ones to be sent out. They are
         -- just blindly emitted, without the rule looking at them again:
@@ -1552,8 +1560,8 @@ failSpanMsgP span msg = P $ \_ -> PFailed span msg
 getPState :: P PState
 getPState = P $ \s -> POk s s
 
-getDynFlags :: P DynFlags
-getDynFlags = P $ \s -> POk s (dflags s)
+instance HasDynFlags P where
+    getDynFlags = P $ \s -> POk s (dflags s)
 
 withThisPackage :: (PackageId -> a) -> P a
 withThisPackage f
@@ -1574,6 +1582,9 @@ setSrcLoc new_loc = P $ \s -> POk s{loc=new_loc} ()
 
 getSrcLoc :: P RealSrcLoc
 getSrcLoc = P $ \s@(PState{ loc=loc }) -> POk s loc
+
+addSrcFile :: FastString -> P ()
+addSrcFile f = P $ \s -> POk s{ srcfiles = f : srcfiles s } ()
 
 setLastToken :: RealSrcSpan -> Int -> P ()
 setLastToken loc len = P $ \s -> POk s {
@@ -1743,6 +1754,8 @@ ffiBit :: Int
 ffiBit= 0
 interruptibleFfiBit :: Int
 interruptibleFfiBit = 1
+cApiFfiBit :: Int
+cApiFfiBit = 2
 parrBit :: Int
 parrBit = 3
 arrowsBit :: Int
@@ -1857,6 +1870,7 @@ mkPState flags buf loc =
       extsBitmap    = fromIntegral bitmap,
       context       = [],
       lex_state     = [bol, 0],
+      srcfiles      = [],
       alr_pending_implicit_tokens = [],
       alr_next_token = Nothing,
       alr_last_loc = alrInitialLoc (fsLit "<no file>"),
@@ -1867,6 +1881,7 @@ mkPState flags buf loc =
     where
       bitmap =     ffiBit                      `setBitIf` xopt Opt_ForeignFunctionInterface flags
                .|. interruptibleFfiBit         `setBitIf` xopt Opt_InterruptibleFFI         flags
+               .|. cApiFfiBit                  `setBitIf` xopt Opt_CApiFFI                  flags
                .|. parrBit                     `setBitIf` xopt Opt_ParallelArrays           flags
                .|. arrowsBit                   `setBitIf` xopt Opt_Arrows                   flags
                .|. thBit                       `setBitIf` xopt Opt_TemplateHaskell          flags
@@ -1890,7 +1905,7 @@ mkPState flags buf loc =
                .|. alternativeLayoutRuleBit    `setBitIf` xopt Opt_AlternativeLayoutRule    flags
                .|. relaxedLayoutBit            `setBitIf` xopt Opt_RelaxedLayout            flags
                .|. nondecreasingIndentationBit `setBitIf` xopt Opt_NondecreasingIndentation flags
-               .|. safeHaskellBit              `setBitIf` safeHaskellOn                     flags
+               .|. safeHaskellBit              `setBitIf` safeImportsOn                     flags
                .|. traditionalRecordSyntaxBit  `setBitIf` xopt Opt_TraditionalRecordSyntax  flags
       --
       setBitIf :: Int -> Bool -> Int
@@ -1942,7 +1957,7 @@ getOffside = P $ \s@PState{last_loc=loc, context=stk} ->
 srcParseErr
   :: StringBuffer       -- current buffer (placed just after the last token)
   -> Int                -- length of the previous token
-  -> Message
+  -> MsgDoc
 srcParseErr buf len
   = hcat [ if null token
              then ptext (sLit "parse error (possibly incorrect indentation)")
@@ -2269,6 +2284,7 @@ oneWordPrags = Map.fromList([("rules", rulePrag),
                            ("generated", token ITgenerated_prag),
                            ("core", token ITcore_prag),
                            ("unpack", token ITunpack_prag),
+                           ("nounpack", token ITnounpack_prag),
                            ("ann", token ITann_prag),
                            ("vectorize", token ITvect_prag),
                            ("novectorize", token ITnovect_prag)])

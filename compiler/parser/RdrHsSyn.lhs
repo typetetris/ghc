@@ -42,7 +42,6 @@ module RdrHsSyn (
         checkValDef,          -- (SrcLoc, HsExp, HsRhs, [HsDecl]) -> P HsDecl
         checkValSig,          -- (SrcLoc, HsExp, HsRhs, [HsDecl]) -> P HsDecl
         checkDoAndIfThenElse,
-        checkKindName,
         checkRecordSyntax,
         parseError,
         parseErrorSDoc,
@@ -50,16 +49,14 @@ module RdrHsSyn (
 
 import HsSyn            -- Lots of it
 import Class            ( FunDep )
-import TypeRep          ( Kind )
-import RdrName          ( RdrName, isRdrTyVar, isRdrTc, mkUnqual, rdrNameOcc,
+import RdrName          ( RdrName, isRdrTyVar, isRdrTc, mkUnqual, rdrNameOcc, 
                           isRdrDataCon, isUnqual, getRdrName, setRdrNameSpace )
-import OccName          ( occNameFS )
-import Name             ( Name, nameOccName )
+import Name             ( Name )
 import BasicTypes       ( maxPrecedence, Activation(..), RuleMatchInfo,
                           InlinePragma(..), InlineSpec(..) )
+import TcEvidence       ( idHsWrapper )
 import Lexer
-import TysWiredIn       ( unitTyCon )
-import TysPrim          ( constraintKindTyConName, constraintKind )
+import TysWiredIn       ( unitTyCon, unitDataCon )
 import ForeignCall
 import OccName          ( srcDataName, varName, isDataOcc, isTcOcc,
                           occNameString )
@@ -110,6 +107,8 @@ extract_lctxt ctxt acc = foldr extract_lty acc (unLoc ctxt)
 extract_ltys :: [LHsType RdrName] -> [Located RdrName] -> [Located RdrName]
 extract_ltys tys acc = foldr extract_lty acc tys
 
+-- IA0_NOTE: Should this function also return kind variables?
+-- (explicit kind poly)
 extract_lty :: LHsType RdrName -> [Located RdrName] -> [Located RdrName]
 extract_lty (L loc ty) acc
   = case ty of
@@ -123,7 +122,7 @@ extract_lty (L loc ty) acc
       HsFunTy ty1 ty2           -> extract_lty ty1 (extract_lty ty2 acc)
       HsIParamTy _ ty           -> extract_lty ty acc
       HsEqTy ty1 ty2            -> extract_lty ty1 (extract_lty ty2 acc)
-      HsOpTy ty1 (L loc tv) ty2 -> extract_tv loc tv (extract_lty ty1 (extract_lty ty2 acc))
+      HsOpTy ty1 (_, (L loc tv)) ty2 -> extract_tv loc tv (extract_lty ty1 (extract_lty ty2 acc))
       HsParTy ty                -> extract_lty ty acc
       HsCoreTy {}               -> acc  -- The type is closed
       HsQuasiQuoteTy {}         -> acc  -- Quasi quotes mention no type variables
@@ -135,6 +134,9 @@ extract_lty (L loc ty) acc
                                 where
                                    locals = hsLTyVarNames tvs
       HsDocTy ty _              -> extract_lty ty acc
+      HsExplicitListTy _ tys    -> extract_ltys tys acc
+      HsExplicitTupleTy _ tys   -> extract_ltys tys acc
+      HsWrapTy _ _              -> panic "extract_lty"
 
 extract_tv :: SrcSpan -> RdrName -> [Located RdrName] -> [Located RdrName]
 extract_tv loc tv acc | isRdrTyVar tv = L loc tv : acc
@@ -191,7 +193,7 @@ mkTyData :: SrcSpan
          -> NewOrData
          -> Bool                -- True <=> data family instance
          -> Located (Maybe (LHsContext RdrName), LHsType RdrName)
-         -> Maybe Kind
+         -> Maybe (LHsKind RdrName)
          -> [LConDecl RdrName]
          -> Maybe [LHsType RdrName]
          -> P (LTyClDecl RdrName)
@@ -219,7 +221,7 @@ mkTySynonym loc is_family lhs rhs
 mkTyFamily :: SrcSpan
            -> FamilyFlavour
            -> LHsType RdrName   -- LHS
-           -> Maybe Kind        -- Optional kind signature
+           -> Maybe (LHsKind RdrName) -- Optional kind signature
            -> P (LTyClDecl RdrName)
 mkTyFamily loc flavour lhs ksig
   = do { (tc, tparams) <- checkTyClHdr lhs
@@ -358,10 +360,12 @@ splitCon :: LHsType RdrName
 splitCon ty
  = split ty []
  where
-   split (L _ (HsAppTy t u)) ts = split t (u : ts)
-   split (L l (HsTyVar tc))  ts = do data_con <- tyConToDataCon l tc
-                                     return (data_con, mk_rest ts)
-   split (L l _) _              = parseErrorSDoc l (text "parse error in constructor in data/newtype declaration:" <+> ppr ty)
+   split (L _ (HsAppTy t u)) ts    = split t (u : ts)
+   split (L l (HsTyVar tc))  ts    = do data_con <- tyConToDataCon l tc
+                                        return (data_con, mk_rest ts)
+   split (L l (HsTupleTy _ [])) [] = return (L l (getRdrName unitDataCon), PrefixCon [])
+                                         -- See Note [Unit tuples] in HsTypes
+   split (L l _) _                 = parseErrorSDoc l (text "parse error in constructor in data/newtype declaration:" <+> ppr ty)
 
    mk_rest [L _ (HsRecTy flds)] = RecCon flds
    mk_rest ts                   = PrefixCon ts
@@ -493,7 +497,7 @@ checkTyVars tycl_hdr tparms = mapM chk tparms
   where
         -- Check that the name space is correct!
     chk (L l (HsKindSig (L _ (HsTyVar tv)) k))
-        | isRdrTyVar tv    = return (L l (KindedTyVar tv k))
+        | isRdrTyVar tv    = return (L l (KindedTyVar tv k placeHolderKind))
     chk (L l (HsTyVar tv))
         | isRdrTyVar tv    = return (L l (UserTyVar tv placeHolderKind))
     chk t@(L l _)
@@ -532,13 +536,14 @@ checkTyClHdr ty
   where
     goL (L l ty) acc = go l ty acc
 
-    go l (HsTyVar tc) acc
-        | isRdrTc tc         = return (L l tc, acc)
-
-    go _ (HsOpTy t1 ltc@(L _ tc) t2) acc
+    go l (HsTyVar tc) acc 
+        | isRdrTc tc          = return (L l tc, acc)
+    go _ (HsOpTy t1 (_, ltc@(L _ tc)) t2) acc
         | isRdrTc tc         = return (ltc, t1:t2:acc)
     go _ (HsParTy ty)    acc = goL ty acc
     go _ (HsAppTy t1 t2) acc = goL t1 (t2:acc)
+    go l (HsTupleTy _ []) [] = return (L l (getRdrName unitTyCon), [])
+                                   -- See Note [Unit tuples] in HsTypes
     go l _               _   = parseErrorSDoc l (text "Malformed head of type or class declaration:" <+> ppr ty)
 
 -- Check that associated type declarations of a class are all kind signatures.
@@ -547,23 +552,21 @@ checkKindSigs :: [LTyClDecl RdrName] -> P ()
 checkKindSigs = mapM_ check
   where
     check (L l tydecl)
-      | isFamilyDecl tydecl
-        || isTypeDecl tydecl = return ()
-      | otherwise            =
-        parseErrorSDoc l (text "Type declaration in a class must be a kind signature or synonym default:" $$ ppr tydecl)
+      | isFamilyDecl tydecl = return ()
+      | isTypeDecl   tydecl = return ()
+      | otherwise
+      = parseErrorSDoc l (text "Type declaration in a class must be a kind signature or synonym default:" 
+                          $$ ppr tydecl)
 
 checkContext :: LHsType RdrName -> P (LHsContext RdrName)
 checkContext (L l orig_t)
   = check orig_t
  where
   check (HsTupleTy _ ts)        -- (Eq a, Ord b) shows up as a tuple type
-    = return (L l ts)
+    = return (L l ts)           -- Ditto ()
 
   check (HsParTy ty)    -- to be sure HsParTy doesn't get into the way
     = check (unLoc ty)
-
-  check (HsTyVar t)     -- Empty context shows up as a unit type ()
-    | t == getRdrName unitTyCon = return (L l [])
 
   check _
     = return (L l [L l orig_t])
@@ -725,7 +728,8 @@ checkPatBind :: LHsExpr RdrName
              -> P (HsBind RdrName)
 checkPatBind lhs (L _ grhss)
   = do  { lhs <- checkPattern lhs
-        ; return (PatBind lhs grhss placeHolderType placeHolderNames) }
+        ; return (PatBind lhs grhss placeHolderType placeHolderNames
+                    (Nothing,[])) }
 
 checkValSig
         :: LHsExpr RdrName
@@ -774,17 +778,6 @@ checkDoAndIfThenElse guardExpr semiThen thenExpr semiElse elseExpr
           expr = text "if"   <+> ppr guardExpr <> pprOptSemi semiThen <+>
                  text "then" <+> ppr thenExpr  <> pprOptSemi semiElse <+>
                  text "else" <+> ppr elseExpr
-
-checkKindName :: Located FastString -> P (Located Kind)
-checkKindName (L l fs) = do
-    pState <- getPState
-    let ext_enabled = xopt Opt_ConstraintKinds (dflags pState)
-        is_kosher = fs == occNameFS (nameOccName constraintKindTyConName)
-    if not ext_enabled || not is_kosher
-     then parseErrorSDoc l (text "Unexpected named kind:"
-                         $$ nest 4 (ppr fs)
-                         $$ if (not ext_enabled && is_kosher) then text "Perhaps you meant to use -XConstraintKinds?" else empty)
-     else return (L l constraintKind)
 \end{code}
 
 
@@ -893,7 +886,8 @@ mk_rec_fields fs False = HsRecFields { rec_flds = fs, rec_dotdot = Nothing }
 mk_rec_fields fs True  = HsRecFields { rec_flds = fs, rec_dotdot = Just (length fs) }
 
 mkInlinePragma :: (InlineSpec, RuleMatchInfo) -> Maybe Activation -> InlinePragma
--- The Maybe is because the user can omit the activation spec (and usually does)
+-- The (Maybe Activation) is because the user can omit 
+-- the activation spec (and usually does)
 mkInlinePragma (inl, match_info) mb_act
   = InlinePragma { inl_inline = inl
                  , inl_sat    = Nothing

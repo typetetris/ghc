@@ -32,12 +32,11 @@
 -- A useful example pass over Cmm is in nativeGen/MachCodeGen.hs
 --
 
-module OldPprCmm
-    ( pprStmt
-    , module PprCmmDecl
-    , module PprCmmExpr
-    )
-where
+module OldPprCmm (
+        pprStmt,
+        module PprCmmDecl,
+        module PprCmmExpr
+    ) where
 
 import BlockId
 import CLabel
@@ -45,7 +44,6 @@ import CmmUtils
 import OldCmm
 import PprCmmDecl
 import PprCmmExpr
-
 
 import BasicTypes
 import ForeignCall
@@ -109,7 +107,7 @@ pprStmt platform stmt = case stmt of
     -- ;
     CmmNop -> semi
 
-    --  // text
+    -- // text
     CmmComment s -> text "//" <+> ftext s
 
     -- reg = expr;
@@ -122,11 +120,10 @@ pprStmt platform stmt = case stmt of
 
     -- call "ccall" foo(x, y)[r1, r2];
     -- ToDo ppr volatile
-    CmmCall (CmmCallee fn cconv) results args safety ret ->
+    CmmCall (CmmCallee fn cconv) results args ret ->
         sep  [ pp_lhs <+> pp_conv
              , nest 2 (pprExpr9 platform fn <>
                        parens (commafy (map ppr_ar args)))
-               <> brackets (pprPlatform platform safety)
              , case ret of CmmMayReturn -> empty
                            CmmNeverReturns -> ptext $ sLit (" never returns")
              ] <> semi
@@ -142,9 +139,9 @@ pprStmt platform stmt = case stmt of
                       _           -> ptext (sLit("foreign")) <+> doubleQuotes (ppr cconv)
 
     -- Call a CallishMachOp, like sin or cos that might be implemented as a library call.
-    CmmCall (CmmPrim op) results args safety ret ->
+    CmmCall (CmmPrim op) results args ret ->
         pprStmt platform (CmmCall (CmmCallee (CmmLit lbl) CCallConv)
-                                  results args safety ret)
+                                  results args ret)
         where
           -- HACK: A CallishMachOp doesn't really correspond to a ForeignLabel, but we
           --       use one to get the label printed.
@@ -154,8 +151,8 @@ pprStmt platform stmt = case stmt of
 
     CmmBranch ident          -> genBranch ident
     CmmCondBranch expr ident -> genCondBranch platform expr ident
-    CmmJump expr params      -> genJump platform expr params
-    CmmReturn params         -> genReturn platform params
+    CmmJump expr live        -> genJump platform expr live
+    CmmReturn                -> genReturn platform
     CmmSwitch arg ids        -> genSwitch platform arg ids
 
 -- Just look like a tuple, since it was a tuple before
@@ -176,7 +173,6 @@ pprUpdateFrame platform (UpdateFrame expr args) =
                     _ -> parens (pprExpr platform expr)
          , space
          , parens  ( commafy $ map (pprPlatform platform) args ) ]
-
 
 -- --------------------------------------------------------------------------
 -- goto local label. [1], section 6.6
@@ -204,31 +200,26 @@ genCondBranch platform expr ident =
 --
 --     jump foo(a, b, c);
 --
-genJump :: Platform -> CmmExpr -> [CmmHinted CmmExpr] -> SDoc
-genJump platform expr args =
+genJump :: Platform -> CmmExpr -> Maybe [GlobalReg] -> SDoc
+genJump platform expr live =
     hcat [ ptext (sLit "jump")
          , space
          , if isTrivialCmmExpr expr
                 then pprExpr platform expr
                 else case expr of
                     CmmLoad (CmmReg _) _ -> pprExpr platform expr
-                    _ -> parens (pprExpr platform expr)
-         , space
-         , parens  ( commafy $ map (pprPlatform platform) args )
-         , semi ]
-
+                    _                    -> parens (pprExpr platform expr)
+         , semi <+> ptext (sLit "// ")
+         , maybe empty ppr live]
 
 -- --------------------------------------------------------------------------
 -- Return from a function. [1], Section 6.8.2 of version 1.128
 --
 --     return (a, b, c);
 --
-genReturn :: Platform -> [CmmHinted CmmExpr] -> SDoc
-genReturn platform args =
-    hcat [ ptext (sLit "return")
-         , space
-         , parens  ( commafy $ map (pprPlatform platform) args )
-         , semi ]
+genReturn :: Platform -> SDoc
+genReturn _ =
+    hcat [ ptext (sLit "return") , semi ]
 
 -- --------------------------------------------------------------------------
 -- Tabled jump to local label
@@ -270,3 +261,4 @@ genSwitch platform expr maybe_ids
 
 commafy :: [SDoc] -> SDoc
 commafy xs = fsep $ punctuate comma xs
+

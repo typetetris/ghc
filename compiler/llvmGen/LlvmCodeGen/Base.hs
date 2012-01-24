@@ -13,6 +13,7 @@ module LlvmCodeGen.Base (
 
         LlvmEnv, initLlvmEnv, clearVars, varLookup, varInsert,
         funLookup, funInsert, getLlvmVer, setLlvmVer, getLlvmPlatform,
+        getDflags, ghcInternalFunctions,
 
         cmmToLlvmType, widthToLlvmFloat, widthToLlvmInt, llvmFunTy,
         llvmFunSig, llvmStdFunAttrs, llvmFunAlign, llvmInfAlign,
@@ -31,6 +32,7 @@ import CLabel
 import CgUtils ( activeStgRegs )
 import Config
 import Constants
+import DynFlags
 import FastString
 import OldCmm
 import qualified Outputable as Outp
@@ -149,26 +151,57 @@ defaultLlvmVersion = 28
 --
 
 -- two maps, one for functions and one for local vars.
-newtype LlvmEnv = LlvmEnv (LlvmEnvMap, LlvmEnvMap, LlvmVersion, Platform)
+newtype LlvmEnv = LlvmEnv (LlvmEnvMap, LlvmEnvMap, LlvmVersion, DynFlags)
+
 type LlvmEnvMap = UniqFM LlvmType
 
 -- | Get initial Llvm environment.
-initLlvmEnv :: Platform -> LlvmEnv
-initLlvmEnv platform = LlvmEnv (emptyUFM, emptyUFM, defaultLlvmVersion, platform)
+initLlvmEnv :: DynFlags -> LlvmEnv
+initLlvmEnv dflags = LlvmEnv (initFuncs, emptyUFM, defaultLlvmVersion, dflags)
+    where initFuncs = listToUFM $ [ (n, LMFunction ty) | (n, ty) <- ghcInternalFunctions ]
+
+-- | Here we pre-initialise some functions that are used internally by GHC
+-- so as to make sure they have the most general type in the case that
+-- user code also uses these functions but with a different type than GHC
+-- internally. (Main offender is treating return type as 'void' instead of
+-- 'void *'. Fixes trac #5486.
+ghcInternalFunctions :: [(LMString, LlvmFunctionDecl)]
+ghcInternalFunctions =
+    [ mk "memcpy" i8Ptr [i8Ptr, i8Ptr, llvmWord]
+    , mk "memmove" i8Ptr [i8Ptr, i8Ptr, llvmWord]
+    , mk "memset" i8Ptr [i8Ptr, llvmWord, llvmWord]
+    , mk "newSpark" llvmWord [i8Ptr, i8Ptr]
+    ]
+  where
+    mk n ret args =
+        let n' = fsLit n
+        in (n', LlvmFunctionDecl n' ExternallyVisible CC_Ccc ret
+                                 FixedArgs (tysToParams args) Nothing)
 
 -- | Clear variables from the environment.
 clearVars :: LlvmEnv -> LlvmEnv
-clearVars (LlvmEnv (e1, _, n, p)) = LlvmEnv (e1, emptyUFM, n, p)
+clearVars (LlvmEnv (e1, _, n, p)) = {-# SCC "llvm_env_clear" #-}
+    LlvmEnv (e1, emptyUFM, n, p)
+
+-- | Insert local variables into the environment.
+varInsert :: Uniquable key => key -> LlvmType -> LlvmEnv -> LlvmEnv
+varInsert s t (LlvmEnv (e1, e2, n, p)) = {-# SCC "llvm_env_vinsert" #-}
+    LlvmEnv (e1, addToUFM e2 s t, n, p)
 
 -- | Insert functions into the environment.
-varInsert, funInsert :: Uniquable key => key -> LlvmType -> LlvmEnv -> LlvmEnv
-varInsert s t (LlvmEnv (e1, e2, n, p)) = LlvmEnv (e1, addToUFM e2 s t, n, p)
-funInsert s t (LlvmEnv (e1, e2, n, p)) = LlvmEnv (addToUFM e1 s t, e2, n, p)
+funInsert :: Uniquable key => key -> LlvmType -> LlvmEnv -> LlvmEnv
+funInsert s t (LlvmEnv (e1, e2, n, p)) = {-# SCC "llvm_env_finsert" #-}
+    LlvmEnv (addToUFM e1 s t, e2, n, p)
+
+-- | Lookup local variables in the environment.
+varLookup :: Uniquable key => key -> LlvmEnv -> Maybe LlvmType
+varLookup s (LlvmEnv (_, e2, _, _)) = {-# SCC "llvm_env_vlookup" #-}
+    lookupUFM e2 s
 
 -- | Lookup functions in the environment.
-varLookup, funLookup :: Uniquable key => key -> LlvmEnv -> Maybe LlvmType
-varLookup s (LlvmEnv (_, e2, _, _)) = lookupUFM e2 s
-funLookup s (LlvmEnv (e1, _, _, _)) = lookupUFM e1 s
+funLookup :: Uniquable key => key -> LlvmEnv -> Maybe LlvmType
+funLookup s (LlvmEnv (e1, _, _, _)) = {-# SCC "llvm_env_flookup" #-}
+    lookupUFM e1 s
 
 -- | Get the LLVM version we are generating code for
 getLlvmVer :: LlvmEnv -> LlvmVersion
@@ -180,7 +213,11 @@ setLlvmVer n (LlvmEnv (e1, e2, _, p)) = LlvmEnv (e1, e2, n, p)
 
 -- | Get the platform we are generating code for
 getLlvmPlatform :: LlvmEnv -> Platform
-getLlvmPlatform (LlvmEnv (_, _, _, p)) = p
+getLlvmPlatform (LlvmEnv (_, _, _, d)) = targetPlatform d
+
+-- | Get the DynFlags for this compilation pass
+getDflags :: LlvmEnv -> DynFlags
+getDflags (LlvmEnv (_, _, _, d)) = d
 
 -- ----------------------------------------------------------------------------
 -- * Label handling
@@ -188,8 +225,8 @@ getLlvmPlatform (LlvmEnv (_, _, _, p)) = p
 
 -- | Pretty print a 'CLabel'.
 strCLabel_llvm :: LlvmEnv -> CLabel -> LMString
-strCLabel_llvm env l
-    = (fsLit . show . llvmSDoc . pprCLabel (getLlvmPlatform env)) l
+strCLabel_llvm env l = {-# SCC "llvm_strCLabel" #-}
+    (fsLit . show . llvmSDoc . pprCLabel (getLlvmPlatform env)) l
 
 -- | Create an external definition for a 'CLabel' defined in another module.
 genCmmLabelRef :: LlvmEnv -> CLabel -> LMGlobal
@@ -200,7 +237,6 @@ genStringLabelRef :: LMString -> LMGlobal
 genStringLabelRef cl
   = let ty = LMPointer $ LMArray 0 llvmWord
     in (LMGlobalVar cl ty External Nothing Nothing False, Nothing)
-
 
 -- ----------------------------------------------------------------------------
 -- * Misc

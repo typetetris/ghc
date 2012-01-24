@@ -6,6 +6,13 @@
 Typechecking class declarations
 
 \begin{code}
+{-# OPTIONS -fno-warn-tabs #-}
+-- The above warning supression flag is a temporary kludge.
+-- While working on this module you are encouraged to remove it and
+-- detab the module (please do the detabbing in a separate patch). See
+--     http://hackage.haskell.org/trac/ghc/wiki/Commentary/CodingStyle#TabsvsSpaces
+-- for details
+
 module TcClassDcl ( tcClassSigs, tcClassDecl2, 
 		    findMethodBind, instantiateMethod, tcInstanceMethodBody,
                     mkGenericDefMethBind,
@@ -17,6 +24,7 @@ module TcClassDcl ( tcClassSigs, tcClassDecl2,
 import HsSyn
 import TcEnv
 import TcPat( addInlinePrags )
+import TcEvidence( idHsWrapper )
 import TcBinds
 import TcUnify
 import TcHsType
@@ -112,7 +120,7 @@ tcClassSigs clas sigs def_methods
     dm_bind_names = [op | L _ (FunBind {fun_id = L _ op}) <- bagToList def_methods]
 
     tc_sig genop_env (op_names, op_hs_ty)
-      = do { op_ty <- tcHsKindedType op_hs_ty	-- Class tyvars already in scope
+      = do { op_ty <- tcHsType op_hs_ty	-- Class tyvars already in scope
            ; return [ (op_name, f op_name, op_ty) | L _ op_name <- op_names ] }
            where
              f nm | nm `elemNameEnv` genop_env = GenericDM
@@ -120,7 +128,7 @@ tcClassSigs clas sigs def_methods
                   | otherwise                  = NoDM
 
     tc_gen_sig (op_names, gen_hs_ty)
-      = do { gen_op_ty <- tcHsKindedType gen_hs_ty
+      = do { gen_op_ty <- tcHsType gen_hs_ty
            ; return [ (op_name, gen_op_ty) | L _ op_name <- op_names ] }
 \end{code}
 
@@ -355,7 +363,7 @@ mkGenericDefMethBind clas inst_tys sel_id dm_name
   = 	-- A generic default method
     	-- If the method is defined generically, we only have to call the
         -- dm_name.
-    do	{ dflags <- getDOpts
+    do	{ dflags <- getDynFlags
 	; liftIO (dumpIfSet_dyn dflags Opt_D_dump_deriv "Filling in method body"
 		   (vcat [ppr clas <+> ppr inst_tys,
 			  nest 2 (ppr sel_id <+> equals <+> ppr rhs)]))

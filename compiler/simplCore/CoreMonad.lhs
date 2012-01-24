@@ -4,6 +4,13 @@
 \section[CoreMonad]{The core pipeline monad}
 
 \begin{code}
+{-# OPTIONS -fno-warn-tabs #-}
+-- The above warning supression flag is a temporary kludge.
+-- While working on this module you are encouraged to remove it and
+-- detab the module (please do the detabbing in a separate patch). See
+--     http://hackage.haskell.org/trac/ghc/wiki/Commentary/CodingStyle#TabsvsSpaces
+-- for details
+
 {-# LANGUAGE UndecidableInstances #-}
 
 module CoreMonad (
@@ -155,7 +162,7 @@ dumpPassResult dflags mb_flag hdr extra_info binds rules
 
   | otherwise
   = Err.debugTraceMsg dflags 2 $
-    (text "Result size of" <+> hdr <+> equals <+> int (coreBindsSize binds))
+    (sep [text "Result size of" <+> hdr, nest 2 (equals <+> ppr (coreBindsStats binds))])
           -- Report result size 
 	  -- This has the side effect of forcing the intermediate to be evaluated
 
@@ -177,7 +184,7 @@ lintPassResult dflags pass binds
        ; displayLintResults dflags pass warns errs binds  }
 
 displayLintResults :: DynFlags -> CoreToDo
-                   -> Bag Err.Message -> Bag Err.Message -> CoreProgram
+                   -> Bag Err.MsgDoc -> Bag Err.MsgDoc -> CoreProgram
                    -> IO ()
 displayLintResults dflags pass warns errs binds
   | not (isEmptyBag errs)
@@ -244,8 +251,9 @@ data CoreToDo           -- These are diff core-to-core passes,
   | CoreDoNothing                -- Useful when building up
   | CoreDoPasses [CoreToDo]      -- lists of these things
 
-  | CoreDesugar	 -- Not strictly a core-to-core pass, but produces
-                 -- Core output, and hence useful to pass to endPass
+  | CoreDesugar    -- Right after desugaring, no simple optimisation yet!
+  | CoreDesugarOpt -- CoreDesugarXXX: Not strictly a core-to-core pass, but produces
+                       --                 Core output, and hence useful to pass to endPass
 
   | CoreTidy
   | CorePrep
@@ -267,6 +275,7 @@ coreDumpFlag CoreDoSpecConstr         = Just Opt_D_dump_spec
 coreDumpFlag CoreCSE                  = Just Opt_D_dump_cse 
 coreDumpFlag CoreDoVectorisation      = Just Opt_D_dump_vect
 coreDumpFlag CoreDesugar              = Just Opt_D_dump_ds 
+coreDumpFlag CoreDesugarOpt           = Just Opt_D_dump_ds 
 coreDumpFlag CoreTidy                 = Just Opt_D_dump_simpl
 coreDumpFlag CorePrep                 = Just Opt_D_dump_prep
 
@@ -288,7 +297,8 @@ instance Outputable CoreToDo where
   ppr CoreDoSpecConstr         = ptext (sLit "SpecConstr")
   ppr CoreCSE                  = ptext (sLit "Common sub-expression")
   ppr CoreDoVectorisation      = ptext (sLit "Vectorisation")
-  ppr CoreDesugar              = ptext (sLit "Desugar")
+  ppr CoreDesugar              = ptext (sLit "Desugar (before optimization)")
+  ppr CoreDesugarOpt           = ptext (sLit "Desugar (after optimization)")
   ppr CoreTidy                 = ptext (sLit "Tidy Core")
   ppr CorePrep 		       = ptext (sLit "CorePrep")
   ppr CoreDoPrintCore          = ptext (sLit "Print core")
@@ -855,8 +865,8 @@ addSimplCount count = write (CoreWriter { cw_simpl_count = count })
 
 -- Convenience accessors for useful fields of HscEnv
 
-getDynFlags :: CoreM DynFlags
-getDynFlags = fmap hsc_dflags getHscEnv
+instance HasDynFlags CoreM where
+    getDynFlags = fmap hsc_dflags getHscEnv
 
 -- | The original name cache is the current mapping from 'Module' and
 -- 'OccName' to a compiler-wide unique 'Name'

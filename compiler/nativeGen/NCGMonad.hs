@@ -6,6 +6,13 @@
 --
 -- -----------------------------------------------------------------------------
 
+{-# OPTIONS -fno-warn-tabs #-}
+-- The above warning supression flag is a temporary kludge.
+-- While working on this module you are encouraged to remove it and
+-- detab the module (please do the detabbing in a separate patch). See
+--     http://hackage.haskell.org/trac/ghc/wiki/Commentary/CodingStyle#TabsvsSpaces
+-- for details
+
 module NCGMonad (
 	NatM_State(..), mkNatM_State,
 
@@ -22,7 +29,7 @@ module NCGMonad (
 	getNewRegPairNat,
 	getPicBaseMaybeNat, 
 	getPicBaseNat, 
-	getDynFlagsNat
+	getDynFlags
 ) 
  
 where
@@ -93,11 +100,9 @@ getUniqueNat = NatM $ \ (NatM_State us delta imports pic dflags) ->
     case takeUniqFromSupply us of
          (uniq, us') -> (uniq, (NatM_State us' delta imports pic dflags))
 
-
-getDynFlagsNat :: NatM DynFlags
-getDynFlagsNat 
-	= NatM $ \ (NatM_State us delta imports pic dflags) ->
-	          (dflags, (NatM_State us delta imports pic dflags))
+instance HasDynFlags NatM where
+    getDynFlags = NatM $ \ (NatM_State us delta imports pic dflags) ->
+                             (dflags, (NatM_State us delta imports pic dflags))
 
 
 getDeltaNat :: NatM Int
@@ -132,14 +137,14 @@ getNewLabelNat
 getNewRegNat :: Size -> NatM Reg
 getNewRegNat rep
  = do u <- getUniqueNat
-      dflags <- getDynFlagsNat
+      dflags <- getDynFlags
       return (RegVirtual $ targetMkVirtualReg (targetPlatform dflags) u rep)
 
 
 getNewRegPairNat :: Size -> NatM (Reg,Reg)
 getNewRegPairNat rep
  = do u <- getUniqueNat
-      dflags <- getDynFlagsNat
+      dflags <- getDynFlags
       let vLo = targetMkVirtualReg (targetPlatform dflags) u rep
       let lo  = RegVirtual $ targetMkVirtualReg (targetPlatform dflags) u rep
       let hi  = RegVirtual $ getHiVirtualRegFromLo vLo

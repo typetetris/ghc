@@ -4,11 +4,18 @@
 \section[SimplMonad]{The simplifier Monad}
 
 \begin{code}
+{-# OPTIONS -fno-warn-tabs #-}
+-- The above warning supression flag is a temporary kludge.
+-- While working on this module you are encouraged to remove it and
+-- detab the module (please do the detabbing in a separate patch). See
+--     http://hackage.haskell.org/trac/ghc/wiki/Commentary/CodingStyle#TabsvsSpaces
+-- for details
+
 module SimplMonad (
 	-- The monad
 	SimplM,
 	initSmpl,
-	getDOptsSmpl, getSimplRules, getFamEnvs,
+	getSimplRules, getFamEnvs,
 
         -- Unique supply
         MonadUnique(..), newId,
@@ -24,7 +31,7 @@ import Type             ( Type )
 import FamInstEnv	( FamInstEnv )
 import Rules		( RuleBase )
 import UniqSupply
-import DynFlags		( DynFlags( simplTickFactor ) )
+import DynFlags
 import CoreMonad
 import Outputable
 import FastString
@@ -66,21 +73,28 @@ initSmpl dflags rules fam_envs us size m
   = case unSM m env us (zeroSimplCount dflags) of 
 	(result, _, count) -> (result, count)
   where
-    -- Compute the max simplifier ticks as
-    --     pgm-size * magic-multiplier * tick-factor/100
-    -- where magic-multiplier is a constant that gives reasonable results
-    max_ticks = fromInteger ((toInteger size * toInteger (simplTickFactor dflags 
-                                                          * magic_multiplier)) 
-                             `div` 100)
+    env = STE { st_flags = dflags, st_rules = rules
+    	      , st_max_ticks = computeMaxTicks dflags size
+              , st_fams = fam_envs }
+
+computeMaxTicks :: DynFlags -> Int -> Int
+-- Compute the max simplifier ticks as
+--     (base-size + pgm-size) * magic-multiplier * tick-factor/100
+-- where 
+--    magic-multiplier is a constant that gives reasonable results
+--    base-size is a constant to deal with size-zero programs
+computeMaxTicks dflags size
+  = fromInteger ((toInteger (size + base_size)
+                  * toInteger (tick_factor * magic_multiplier))
+          `div` 100)
+  where
+    tick_factor      = simplTickFactor dflags 
+    base_size        = 100
     magic_multiplier = 40
 	-- MAGIC NUMBER, multiplies the simplTickFactor
 	-- We can afford to be generous; this is really
 	-- just checking for loops, and shouldn't usually fire
 	-- A figure of 20 was too small: see Trac #553
-
-    env = STE { st_flags = dflags, st_rules = rules
-    	      , st_max_ticks = max_ticks
-              , st_fams = fam_envs }
 
 {-# INLINE thenSmpl #-}
 {-# INLINE thenSmpl_ #-}
@@ -134,8 +148,8 @@ instance MonadUnique SimplM where
         = SM (\_st_env us sc -> case splitUniqSupply us of
                                 (us1, us2) -> (uniqsFromSupply us1, us2, sc))
 
-getDOptsSmpl :: SimplM DynFlags
-getDOptsSmpl = SM (\st_env us sc -> (st_flags st_env, us, sc))
+instance HasDynFlags SimplM where
+    getDynFlags = SM (\st_env us sc -> (st_flags st_env, us, sc))
 
 getSimplRules :: SimplM RuleBase
 getSimplRules = SM (\st_env us sc -> (st_rules st_env, us, sc))

@@ -12,11 +12,11 @@ module Vectorise.Monad.Global (
   lookupVectDecl, noVectDecl, 
   
   -- * Scalars
-  globalScalarVars, isGlobalScalar, globalScalarTyCons,
+  globalScalarVars, isGlobalScalarVar, globalScalarTyCons,
   
   -- * TyCons
   lookupTyCon,
-  defTyCon, globalVectTyCons,
+  defTyConName, defTyCon, globalVectTyCons,
   
   -- * Datacons
   lookupDataCon,
@@ -39,8 +39,11 @@ import TyCon
 import DataCon
 import NameEnv
 import NameSet
+import Name
 import VarEnv
 import VarSet
+import Var as Var
+import FastString
 import Outputable
 
 
@@ -70,8 +73,22 @@ defGlobalVar :: Var -> Var -> VM ()
 defGlobalVar v v'
   = do { traceVt "add global var mapping:" (ppr v <+> text "-->" <+> ppr v') 
 
-       ; updGEnv $ \env -> env { global_vars = extendVarEnv (global_vars env) v v' }
+           -- check for duplicate vectorisation
+       ; currentDef <- readGEnv $ \env -> lookupVarEnv (global_vars env) v
+       ; case currentDef of
+           Just old_v' -> cantVectorise "Variable is already vectorised:" $
+                            ppr v <+> moduleOf v old_v'
+           Nothing     -> return ()
+
+       ; updGEnv  $ \env -> env { global_vars = extendVarEnv (global_vars env) v v' }
        }
+  where
+    moduleOf var var' | var == var'
+                      = ptext (sLit "vectorises to itself")
+                      | Just mod <- nameModule_maybe (Var.varName var') 
+                      = ptext (sLit "in module") <+> ppr mod
+                      | otherwise
+                      = ptext (sLit "in the current module")
 
 
 -- Vectorisation declarations -------------------------------------------------
@@ -96,8 +113,8 @@ globalScalarVars = readGEnv global_scalar_vars
 
 -- |Check whether a given variable is in the set of global scalar variables.
 --
-isGlobalScalar :: Var -> VM Bool
-isGlobalScalar var = readGEnv $ \env -> var `elemVarSet` global_scalar_vars env
+isGlobalScalarVar :: Var -> VM Bool
+isGlobalScalarVar var = readGEnv $ \env -> var `elemVarSet` global_scalar_vars env
 
 -- |Get the set of global scalar type constructors including both those scalar type constructors
 -- declared in an imported module and those declared in the current module.
@@ -119,9 +136,36 @@ lookupTyCon tc
 
 -- |Add a mapping between plain and vectorised `TyCon`s to the global environment.
 --
+-- The second argument is only to enable tracing for (mutually) recursively defined type
+-- constructors, where we /must not/ pull at the vectorised type constructors (because that would
+-- pull too early at the recursive knot).
+--
+defTyConName :: TyCon -> Name -> TyCon -> VM ()
+defTyConName tc nameOfTc' tc'
+  = do { traceVt "add global tycon mapping:" (ppr tc <+> text "-->" <+> ppr nameOfTc') 
+
+           -- check for duplicate vectorisation
+       ; currentDef <- readGEnv $ \env -> lookupNameEnv (global_tycons env) (tyConName tc)
+       ; case currentDef of
+           Just old_tc' -> cantVectorise "Type constructor or class is already vectorised:" $
+                            ppr tc <+> moduleOf tc old_tc'
+           Nothing     -> return ()
+
+       ; updGEnv $ \env -> 
+           env { global_tycons = extendNameEnv (global_tycons env) (tyConName tc) tc' }
+       }
+  where
+    moduleOf tc tc' | tc == tc'
+                    = ptext (sLit "vectorises to itself")
+                    | Just mod <- nameModule_maybe (tyConName tc') 
+                    = ptext (sLit "in module") <+> ppr mod
+                    | otherwise
+                    = ptext (sLit "in the current module")
+
+-- |Add a mapping between plain and vectorised `TyCon`s to the global environment.
+--
 defTyCon :: TyCon -> TyCon -> VM ()
-defTyCon tc tc' = updGEnv $ \env ->
-  env { global_tycons = extendNameEnv (global_tycons env) (tyConName tc) tc' }
+defTyCon tc tc' = defTyConName tc (tyConName tc') tc'
 
 -- |Get the set of all vectorised type constructors.
 --
@@ -137,7 +181,6 @@ lookupDataCon :: DataCon -> VM (Maybe DataCon)
 lookupDataCon dc
   | isTupleTyCon (dataConTyCon dc) 
   = return (Just dc)
-
   | otherwise 
   = readGEnv $ \env -> lookupNameEnv (global_datacons env) (dataConName dc)
 
@@ -169,5 +212,3 @@ defTyConPAs ps = updGEnv $ \env ->
 
 lookupTyConPR :: TyCon -> VM (Maybe Var)
 lookupTyConPR tc = readGEnv $ \env -> lookupNameEnv (global_pr_funs env) (tyConName tc)
-
-

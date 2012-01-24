@@ -6,6 +6,13 @@
 The @TyCon@ datatype
 
 \begin{code}
+{-# OPTIONS -fno-warn-tabs #-}
+-- The above warning supression flag is a temporary kludge.
+-- While working on this module you are encouraged to remove it and
+-- detab the module (please do the detabbing in a separate patch). See
+--     http://hackage.haskell.org/trac/ghc/wiki/Commentary/CodingStyle#TabsvsSpaces
+-- for details
+
 module TyCon(
         -- * Main TyCon data types
 	TyCon, FieldLabel, 
@@ -15,7 +22,9 @@ module TyCon(
 	SynTyConRhs(..),
 
 	-- ** Coercion axiom constructors
-        CoAxiom(..), coAxiomName, coAxiomArity,
+        CoAxiom(..), 
+        coAxiomName, coAxiomArity, coAxiomTyVars,
+        coAxiomLHS, coAxiomRHS, isImplicitCoAxiom,
 
         -- ** Constructing TyCons
 	mkAlgTyCon,
@@ -29,7 +38,8 @@ module TyCon(
 	mkSynTyCon,
         mkSuperKindTyCon,
         mkForeignTyCon,
-        mkAnyTyCon,
+	mkPromotedDataTyCon,
+	mkPromotedTypeTyCon,
 
         -- ** Predicates on TyCons
         isAlgTyCon,
@@ -39,7 +49,8 @@ module TyCon(
         isTupleTyCon, isUnboxedTupleTyCon, isBoxedTupleTyCon, 
         isSynTyCon, isClosedSynTyCon,
         isSuperKindTyCon, isDecomposableTyCon,
-        isForeignTyCon, isAnyTyCon, tyConHasKind,
+        isForeignTyCon, tyConHasKind,
+        isPromotedDataTyCon, isPromotedTypeTyCon,
 
 	isInjectiveTyCon,
 	isDataTyCon, isProductTyCon, isEnumerationTyCon, 
@@ -62,7 +73,7 @@ module TyCon(
 	tyConArity,
         tyConParent,
 	tyConTuple_maybe, tyConClass_maybe, tyConIP_maybe,
-	tyConFamInst_maybe, tyConFamilyCoercion_maybe,tyConFamInstSig_maybe,
+	tyConFamInst_maybe, tyConFamInstSig_maybe, tyConFamilyCoercion_maybe,
         synTyConDefn, synTyConRhs, synTyConType,
         tyConExtName,           -- External name for foreign types
 	algTyConRhs,
@@ -83,7 +94,7 @@ module TyCon(
 #include "HsVersions.h"
 
 import {-# SOURCE #-} TypeRep ( Kind, Type, PredType )
-import {-# SOURCE #-} DataCon ( DataCon, isVanillaDataCon )
+import {-# SOURCE #-} DataCon ( DataCon, isVanillaDataCon, dataConName )
 import {-# SOURCE #-} IParam  ( ipTyConName )
 
 import Var
@@ -97,7 +108,7 @@ import FastString
 import Constants
 import Util
 import qualified Data.Data as Data
-import Data.Typeable hiding (TyCon)
+import Data.Typeable (Typeable)
 \end{code}
 
 -----------------------------------------------
@@ -129,47 +140,10 @@ Note [Type synonym families]
   translates to
     a SynTyCon 'F', whose SynTyConRhs is SynFamilyTyCon
 
-* Translation of type instance decl:
-	type instance F [a] = Maybe a
-  translates to a "representation TyCon", 'R:FList', where
-     R:FList is a SynTyCon, whose 
-       SynTyConRhs is (SynonymTyCon (Maybe a))
-       TyConParent is (FamInstTyCon F [a] co)
-         where co :: F [a] ~ R:FList a
-
-  It's very much as if the user had written
-       type instance F [a] = R:FList a
-       type R:FList a = Maybe a
-  Indeed, in GHC's internal representation, the RHS of every
-  'type instance' is simply an application of the representation
-  TyCon to the quantified varaibles.
-
-  The intermediate representation TyCon is a bit gratuitous, but 
-  it means that:
-
-        each 'type instance' decls is in 1-1 correspondance 
-	with its representation TyCon
-
-  So the result of typechecking a 'type instance' decl is just a
-  TyCon.  In turn this means that type and data families can be
-  treated uniformly.
-
 * Translation of type family decl:
 	type family F a :: *
   translates to
     a SynTyCon 'F', whose SynTyConRhs is SynFamilyTyCon
-
-* Translation of type instance decl:
-	type instance F [a] = Maybe a
-  translates to
-    A SynTyCon 'R:FList a', whose 
-       SynTyConRhs is (SynonymTyCon (Maybe a))
-       TyConParent is (FamInstTyCon F [a] co)
-         where co :: F [a] ~ R:FList a
-    Notice that we introduce a gratuitous vanilla type synonym
-       type R:FList a = Maybe a
-    solely so that type and data families can be treated more
-    uniformly, via a single FamInstTyCon descriptor        
 
 * In the future we might want to support
     * closed type families (esp when we have proper kinds)
@@ -334,7 +308,7 @@ data TyCon
 	tc_kind     :: Kind,
 	tyConArity  :: Arity,
 
-	tyConTyVars :: [TyVar],	  -- ^ The type variables used in the type constructor.
+	tyConTyVars :: [TyVar],	  -- ^ The kind and type variables used in the type constructor.
                                   -- Invariant: length tyvars = arity
 	                          -- Precisely, this list scopes over:
 	                          --
@@ -420,19 +394,6 @@ data TyCon
                                            --   holds the name of the imported thing
     }
 
-  -- | Any types.  Like tuples, this is a potentially-infinite family of TyCons
-  --   one for each distinct Kind. They have no values at all.
-  --   Because there are infinitely many of them (like tuples) they are 
-  --   defined in GHC.Prim and have names like "Any(*->*)".  
-  --   Their Unique is derived from the OccName.
-  -- See Note [Any types] in TysPrim
-  | AnyTyCon {
-	tyConUnique  :: Unique,
-	tyConName    :: Name,
-	tc_kind      :: Kind	-- Never = *; that is done via PrimTyCon
-		     		-- See Note [Any types] in TysPrim
-    }
-
   -- | Super-kinds. These are "kinds-of-kinds" and are never seen in
   -- Haskell source programs.  There are only two super-kinds: TY (aka
   -- "box"), which is the super-kind of kinds that construct types
@@ -444,6 +405,23 @@ data TyCon
         tyConUnique :: Unique,
         tyConName   :: Name
     }
+
+  -- | Represents promoted data constructor.
+  | PromotedDataTyCon {	   	-- See Note [Promoted data constructors]
+	tyConUnique :: Unique, -- ^ Same Unique as the data constructor
+	tyConName   :: Name,   -- ^ Same Name as the data constructor
+	tc_kind     :: Kind,   -- ^ Translated type of the data constructor
+        dataCon     :: DataCon -- ^ Corresponding data constructor
+    }
+
+  -- | Represents promoted type constructor.
+  | PromotedTypeTyCon {
+	tyConUnique :: Unique, -- ^ Same Unique as the type constructor
+	tyConName   :: Name,   -- ^ Same Name as the type constructor
+	tyConArity  :: Arity,  -- ^ n if ty_con :: * -> ... -> *  n times
+        ty_con      :: TyCon   -- ^ Corresponding type constructor
+    }
+
   deriving Typeable
 
 -- | Names of the fields in an algebraic record type
@@ -544,6 +522,7 @@ data TyConParent
     NoParentTyCon
 
   -- | Type constructors representing a class dictionary.
+  -- See Note [ATyCon for classes] in TypeRep
   | ClassTyCon
 	Class		-- INVARIANT: the classTyCon of this Class is the current tycon
 
@@ -556,7 +535,7 @@ data TyConParent
         Class		-- The class in whose declaration the family is declared
 			-- See Note [Associated families and their parent class]
 
-  -- | Type constructors representing an instance of a type family. Parameters:
+  -- | Type constructors representing an instance of a *data* family. Parameters:
   --
   --  1) The type family in question
   --
@@ -567,11 +546,17 @@ data TyConParent
   --  3) A 'CoTyCon' identifying the representation
   --  type with the type instance family
   | FamInstTyCon	  -- See Note [Data type families]
-    			  -- and Note [Type synonym families]
+        CoAxiom   -- The coercion constructor,
+                  -- always of kind   T ty1 ty2 ~ R:T a b c
+                  -- where T is the family TyCon, 
+                  -- and R:T is the representation TyCon (ie this one)
+                  -- and a,b,c are the tyConTyVars of this TyCon
+
+          -- Cached fields of the CoAxiom, but adjusted to
+          -- use the tyConTyVars of this TyCon
 	TyCon   -- The family TyCon
 	[Type]	-- Argument types (mentions the tyConTyVars of this TyCon)
 		-- Match in length the tyConTyVars of the family TyCon
-        CoAxiom   -- The coercion constructor
 
 	-- E.g.  data intance T [a] = ...
 	-- gives a representation tycon:
@@ -584,15 +569,15 @@ instance Outputable TyConParent where
     ppr (ClassTyCon cls)        = text "Class parent" <+> ppr cls
     ppr (IPTyCon n)             = text "IP parent" <+> ppr n
     ppr (AssocFamilyTyCon cls)  = text "Class parent (assoc. family)" <+> ppr cls
-    ppr (FamInstTyCon tc tys _) = text "Family parent (family instance)" <+> ppr tc <+> sep (map ppr tys)
+    ppr (FamInstTyCon _ tc tys) = text "Family parent (family instance)" <+> ppr tc <+> sep (map ppr tys)
 
 -- | Checks the invariants of a 'TyConParent' given the appropriate type class name, if any
 okParent :: Name -> TyConParent -> Bool
-okParent _       NoParentTyCon                    = True
-okParent tc_name (AssocFamilyTyCon cls)           = tc_name `elem` map tyConName (classATs cls)
-okParent tc_name (ClassTyCon cls)                 = tc_name == tyConName (classTyCon cls)
-okParent tc_name (IPTyCon ip)                     = tc_name == ipTyConName ip
-okParent _       (FamInstTyCon fam_tc tys _co_tc) = tyConArity fam_tc == length tys
+okParent _       NoParentTyCon               = True
+okParent tc_name (AssocFamilyTyCon cls)      = tc_name `elem` map tyConName (classATs cls)
+okParent tc_name (ClassTyCon cls)            = tc_name == tyConName (classTyCon cls)
+okParent tc_name (IPTyCon ip)                = tc_name == ipTyConName ip
+okParent _       (FamInstTyCon _ fam_tc tys) = tyConArity fam_tc == length tys
 
 isNoParent :: TyConParent -> Bool
 isNoParent NoParentTyCon = True
@@ -611,6 +596,34 @@ data SynTyConRhs
    -- | A type synonym family  e.g. @type family F x y :: * -> *@
    | SynFamilyTyCon
 \end{code}
+
+Note [Promoted data constructors]
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+A data constructor can be promoted to become a type constructor,
+via the PromotedDataTyCon alternative in TyCon.
+
+* Only "vanilla" data constructors are promoted; ones with no GADT
+  stuff, no existentials, etc.  We might generalise this later.
+
+* The TyCon promoted from a DataCon has the *same* Name and Unique as
+  the DataCon.  Eg. If the data constructor Data.Maybe.Just(unique 78,
+  say) is promoted to a TyCon whose name is Data.Maybe.Just(unique 78)
+
+* The *kind* of a promoted DataCon may be polymorphic.  Example:
+    type of DataCon           Just :: forall (a:*). a -> Maybe a
+    kind of (promoted) tycon  Just :: forall (a:box). a -> Maybe a
+  The kind is not identical to the type, because of the */box 
+  kind signature on the forall'd variable; so the tc_kind field of
+  PromotedDataTyCon is not identical to the dataConUserType of the 
+  DataCon.  But it's the same modulo changing the variable kinds,
+  done by Kind.promoteType. 
+
+* Small note: We promote the *user* type of the DataCon.  Eg
+     data T = MkT {-# UNPACK #-} !(Bool, Bool)
+  The promoted kind is
+     MkT :: (Bool,Bool) -> T
+  *not* 
+     MkT :: Bool -> Bool -> T
 
 Note [Enumeration types]
 ~~~~~~~~~~~~~~~~~~~~~~~~
@@ -634,23 +647,21 @@ See Trac #4528.
 
 Note [Newtype coercions]
 ~~~~~~~~~~~~~~~~~~~~~~~~
-The NewTyCon field nt_co is a a TyCon (a coercion constructor in fact)
-which is used for coercing from the representation type of the
-newtype, to the newtype itself. For example,
+The NewTyCon field nt_co is a CoAxiom which is used for coercing from
+the representation type of the newtype, to the newtype itself. For
+example,
 
    newtype T a = MkT (a -> a)
 
-the NewTyCon for T will contain nt_co = CoT where CoT t : T t ~ t ->
-t.  This TyCon is a CoTyCon, so it does not have a kind on its
-own; it basically has its own typing rule for the fully-applied
-version.  If the newtype T has k type variables then CoT has arity at
-most k.  In the case that the right hand side is a type application
+the NewTyCon for T will contain nt_co = CoT where CoT t : T t ~ t -> t.  
+
+In the case that the right hand side is a type application
 ending with the same type variables as the left hand side, we
 "eta-contract" the coercion.  So if we had
 
    newtype S a = MkT [a]
 
-then we would generate the arity 0 coercion CoS : S ~ [].  The
+then we would generate the arity 0 axiom CoS : S ~ [].  The
 primary reason we do this is to make newtype deriving cleaner.
 
 In the paper we'd write
@@ -658,14 +669,6 @@ In the paper we'd write
 and then when we used CoT at a particular type, s, we'd say
 	CoT @ s
 which encodes as (TyConApp instCoercionTyCon [TyConApp CoT [], s])
-
-But in GHC we instead make CoT into a new piece of type syntax, CoTyCon,
-(like instCoercionTyCon, symCoercionTyCon etc), which must always
-be saturated, but which encodes as
-	TyConApp CoT [s]
-In the vocabulary of the paper it's as if we had axiom declarations
-like
-	axiom CoT t :  T t ~ [t]
 
 Note [Newtype eta]
 ~~~~~~~~~~~~~~~~~~
@@ -715,12 +718,14 @@ so the coercion tycon CoT must have
 \begin{code}
 -- | A 'CoAxiom' is a \"coercion constructor\", i.e. a named equality axiom.
 data CoAxiom
-  = CoAxiom                   -- type equality axiom.
-    { co_ax_unique :: Unique   -- unique identifier
-    , co_ax_name   :: Name     -- name for pretty-printing
-    , co_ax_tvs    :: [TyVar]  -- bound type variables 
-    , co_ax_lhs    :: Type     -- left-hand side of the equality
-    , co_ax_rhs    :: Type     -- right-hand side of the equality
+  = CoAxiom                   -- Type equality axiom.
+    { co_ax_unique   :: Unique      -- unique identifier
+    , co_ax_name     :: Name        -- name for pretty-printing
+    , co_ax_tvs      :: [TyVar]     -- bound type variables 
+    , co_ax_lhs      :: Type        -- left-hand side of the equality
+    , co_ax_rhs      :: Type        -- right-hand side of the equality
+    , co_ax_implicit :: Bool        -- True <=> the axiom is "implicit"
+                                    -- See Note [Implicit axioms]
     }
   deriving Typeable
 
@@ -729,7 +734,28 @@ coAxiomArity ax = length (co_ax_tvs ax)
 
 coAxiomName :: CoAxiom -> Name
 coAxiomName = co_ax_name
+
+coAxiomTyVars :: CoAxiom -> [TyVar]
+coAxiomTyVars = co_ax_tvs
+
+coAxiomLHS, coAxiomRHS :: CoAxiom -> Type
+coAxiomLHS = co_ax_lhs
+coAxiomRHS = co_ax_rhs
+
+isImplicitCoAxiom :: CoAxiom -> Bool
+isImplicitCoAxiom = co_ax_implicit
 \end{code}
+
+Note [Implicit axioms]
+~~~~~~~~~~~~~~~~~~~~~~
+See also Note [Implicit TyThings] in HscTypes
+* A CoAxiom arising from data/type family instances is not "implicit".
+  That is, it has its own IfaceAxiom declaration in an interface file
+
+* The CoAxiom arising from a newtype declaration *is* "implicit".
+  That is, it does not have its own IfaceAxiom declaration in an
+  interface file; instead the CoAxiom is generated by type-checking
+  the newtype declaration
 
 
 %************************************************************************
@@ -926,12 +952,6 @@ mkSynTyCon name kind tyvars rhs parent
         synTcParent = parent
     }
 
-mkAnyTyCon :: Name -> Kind -> TyCon
-mkAnyTyCon name kind 
-  = AnyTyCon {  tyConName = name,
-		tc_kind = kind,
-        	tyConUnique = nameUnique name }
-
 -- | Create a super-kind 'TyCon'
 mkSuperKindTyCon :: Name -> TyCon -- Super kinds always have arity zero
 mkSuperKindTyCon name
@@ -939,6 +959,27 @@ mkSuperKindTyCon name
         tyConName = name,
         tyConUnique = nameUnique name
   }
+
+-- | Create a promoted data constructor 'TyCon'
+mkPromotedDataTyCon :: DataCon -> Name -> Unique -> Kind -> TyCon
+mkPromotedDataTyCon con name unique kind
+  = PromotedDataTyCon {
+        tyConName = name,
+        tyConUnique = unique,
+        tc_kind = kind,
+        dataCon = con
+  }
+
+-- | Create a promoted type constructor 'TyCon'
+mkPromotedTypeTyCon :: TyCon -> TyCon
+mkPromotedTypeTyCon con
+  = PromotedTypeTyCon {
+        tyConName = getName con,
+        tyConUnique = getUnique con,
+        tyConArity = tyConArity con,
+        ty_con = con
+  }
+
 \end{code}
 
 \begin{code}
@@ -1009,6 +1050,7 @@ isDistinctTyCon (AlgTyCon {algTcRhs = rhs}) = isDistinctAlgRhs rhs
 isDistinctTyCon (FunTyCon {})               = True
 isDistinctTyCon (TupleTyCon {})             = True
 isDistinctTyCon (PrimTyCon {})              = True
+isDistinctTyCon (PromotedDataTyCon {})      = True
 isDistinctTyCon _                           = False
 
 isDistinctAlgRhs :: AlgTyConRhs -> Bool
@@ -1171,10 +1213,15 @@ isSuperKindTyCon :: TyCon -> Bool
 isSuperKindTyCon (SuperKindTyCon {}) = True
 isSuperKindTyCon _                   = False
 
--- | Is this an AnyTyCon?
-isAnyTyCon :: TyCon -> Bool
-isAnyTyCon (AnyTyCon {}) = True
-isAnyTyCon _              = False
+-- | Is this a PromotedDataTyCon?
+isPromotedDataTyCon :: TyCon -> Bool
+isPromotedDataTyCon (PromotedDataTyCon {}) = True
+isPromotedDataTyCon _                      = False
+
+-- | Is this a PromotedTypeTyCon?
+isPromotedTypeTyCon :: TyCon -> Bool
+isPromotedTypeTyCon (PromotedTypeTyCon {}) = True
+isPromotedTypeTyCon _                      = False
 
 -- | Identifies implicit tycons that, in particular, do not go into interface
 -- files (because they are implicitly reconstructed when the interface is
@@ -1188,12 +1235,13 @@ isAnyTyCon _              = False
 -- * Family instances are /not/ implicit as they represent the instance body
 --   (similar to a @dfun@ does that for a class instance).
 isImplicitTyCon :: TyCon -> Bool
-isImplicitTyCon tycon | isTyConAssoc tycon           = True
-		      | isSynTyCon tycon	     = False
-		      | isAlgTyCon tycon	     = isTupleTyCon tycon
-isImplicitTyCon _other                               = True
-        -- catches: FunTyCon, PrimTyCon, 
-        -- CoTyCon, SuperKindTyCon
+isImplicitTyCon tycon 
+  | isTyConAssoc tycon = True
+  | isSynTyCon tycon   = False
+  | isAlgTyCon tycon   = isTupleTyCon tycon
+  | otherwise          = True
+        -- 'otherwise' catches: FunTyCon, PrimTyCon, 
+        -- PromotedDataCon, PomotedTypeTyCon, SuperKindTyCon
 \end{code}
 
 
@@ -1242,12 +1290,12 @@ expand tvs rhs tys
 \begin{code}
 
 tyConKind :: TyCon -> Kind
-tyConKind (FunTyCon   { tc_kind = k }) = k
-tyConKind (AlgTyCon   { tc_kind = k }) = k
-tyConKind (TupleTyCon { tc_kind = k }) = k
-tyConKind (SynTyCon   { tc_kind = k }) = k
-tyConKind (PrimTyCon  { tc_kind = k }) = k
-tyConKind (AnyTyCon   { tc_kind = k }) = k
+tyConKind (FunTyCon          { tc_kind = k }) = k
+tyConKind (AlgTyCon          { tc_kind = k }) = k
+tyConKind (TupleTyCon        { tc_kind = k }) = k
+tyConKind (SynTyCon          { tc_kind = k }) = k
+tyConKind (PrimTyCon         { tc_kind = k }) = k
+tyConKind (PromotedDataTyCon { tc_kind = k }) = k
 tyConKind tc = pprPanic "tyConKind" (ppr tc)	-- SuperKindTyCon and CoTyCon
 
 tyConHasKind :: TyCon -> Bool
@@ -1402,15 +1450,15 @@ isFamInstTyCon tc = case tyConParent tc of
 tyConFamInstSig_maybe :: TyCon -> Maybe (TyCon, [Type], CoAxiom)
 tyConFamInstSig_maybe tc
   = case tyConParent tc of
-      FamInstTyCon f ts co_tc -> Just (f, ts, co_tc)
-      _                       -> Nothing
+      FamInstTyCon ax f ts -> Just (f, ts, ax)
+      _                    -> Nothing
 
 -- | If this 'TyCon' is that of a family instance, return the family in question
 -- and the instance types. Otherwise, return @Nothing@
 tyConFamInst_maybe :: TyCon -> Maybe (TyCon, [Type])
 tyConFamInst_maybe tc
   = case tyConParent tc of
-      FamInstTyCon f ts _ -> Just (f, ts)
+      FamInstTyCon _ f ts -> Just (f, ts)
       _                   -> Nothing
 
 -- | If this 'TyCon' is that of a family instance, return a 'TyCon' which represents 
@@ -1419,7 +1467,7 @@ tyConFamInst_maybe tc
 tyConFamilyCoercion_maybe :: TyCon -> Maybe CoAxiom
 tyConFamilyCoercion_maybe tc
   = case tyConParent tc of
-      FamInstTyCon _ _ co -> Just co
+      FamInstTyCon co _ _ -> Just co
       _                   -> Nothing
 \end{code}
 
@@ -1451,7 +1499,8 @@ instance Uniquable TyCon where
     getUnique tc = tyConUnique tc
 
 instance Outputable TyCon where
-    ppr tc  = ppr (getName tc) 
+    ppr (PromotedDataTyCon {dataCon = dc}) = quote (ppr (dataConName dc))
+    ppr tc = ppr (getName tc)
 
 instance NamedThing TyCon where
     getName = tyConName

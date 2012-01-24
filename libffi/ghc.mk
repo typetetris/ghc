@@ -11,16 +11,43 @@
 # -----------------------------------------------------------------------------
 
 
-libffi_STAMP_CONFIGURE = libffi/stamp.ffi.configure
-libffi_STAMP_BUILD     = libffi/stamp.ffi.build
-libffi_STAMP_INSTALL   = libffi/stamp.ffi.install
+libffi_STAMP_STATIC_CONFIGURE = libffi/stamp.ffi.static.configure
+libffi_STAMP_STATIC_BUILD     = libffi/stamp.ffi.static.build
+libffi_STAMP_STATIC_INSTALL   = libffi/stamp.ffi.static.install
+
+libffi_STAMP_STATIC_SHARED_CONFIGURE = libffi/stamp.ffi.static-shared.configure
+libffi_STAMP_STATIC_SHARED_BUILD     = libffi/stamp.ffi.static-shared.build
+libffi_STAMP_STATIC_SHARED_INSTALL   = libffi/stamp.ffi.static-shared.install
+
+ifeq "$(BuildSharedLibs)" "YES"
+libffi_STAMP_CONFIGURE = $(libffi_STAMP_STATIC_SHARED_CONFIGURE)
+libffi_STAMP_BUILD     = $(libffi_STAMP_STATIC_SHARED_BUILD)
+libffi_STAMP_INSTALL   = $(libffi_STAMP_STATIC_SHARED_INSTALL)
+libffi_EnableShared    = yes
+else
+libffi_STAMP_CONFIGURE = $(libffi_STAMP_STATIC_CONFIGURE)
+libffi_STAMP_BUILD     = $(libffi_STAMP_STATIC_BUILD)
+libffi_STAMP_INSTALL   = $(libffi_STAMP_STATIC_INSTALL)
+libffi_EnableShared    = no
+endif
 
 libffi_STATIC_LIB  = libffi/build/inst/lib/libffi.a
-ffi_HEADER         = rts/dist/build/ffi.h
+libffi_HEADERS     = rts/dist/build/ffi.h \
+                     rts/dist/build/ffitarget.h
+
+ifeq "$(OSTYPE)" "cygwin"
+LIBFFI_PATH_MANGLE = PATH=$$(cygpath "$(TOP)")/libffi:$$PATH; export PATH;
+endif
 
 ifneq "$(BINDIST)" "YES"
-$(libffi_STAMP_CONFIGURE):
-	"$(RM)" $(RM_OPTS_REC) $(LIBFFI_DIR) libffi/build
+$(libffi_STAMP_CONFIGURE): $(TOUCH_DEP)
+	$(call removeFiles,$(libffi_STAMP_STATIC_CONFIGURE))
+	$(call removeFiles,$(libffi_STAMP_STATIC_BUILD))
+	$(call removeFiles,$(libffi_STAMP_STATIC_INSTALL))
+	$(call removeFiles,$(libffi_STAMP_STATIC_SHARED_CONFIGURE))
+	$(call removeFiles,$(libffi_STAMP_STATIC_SHARED_BUILD))
+	$(call removeFiles,$(libffi_STAMP_STATIC_SHARED_INSTALL))
+	$(call removeTrees,$(LIBFFI_DIR) libffi/build)
 	cat ghc-tarballs/libffi/libffi*.tar.gz | $(GZIP_CMD) -d | { cd libffi && $(TAR_CMD) -xf - ; }
 	mv libffi/libffi-* libffi/build
 
@@ -29,11 +56,21 @@ $(libffi_STAMP_CONFIGURE):
 # will use cygwin symbolic links which cannot be read by mingw gcc.
 	chmod +x libffi/ln
 
+	# We need to use -MMD rather than -MD, as otherwise we get paths
+	# like c:/... in the dependency files on Windows, and the extra
+	# colons break make
+	mv libffi/build/Makefile.in libffi/build/Makefile.in.orig
+	sed "s/-MD/-MMD/" < libffi/build/Makefile.in.orig > libffi/build/Makefile.in
+
+	# Their cmd invocation only works on msys. On cygwin it starts
+	# a cmd interactive shell. The replacement works in both environments.
+	mv libffi/build/ltmain.sh libffi/build/ltmain.sh.orig
+	sed 's#cmd //c echo "\$$1"#cmd /c "echo $$1"#' < libffi/build/ltmain.sh.orig > libffi/build/ltmain.sh
+
 # Because -Werror may be in SRC_CC_OPTS/SRC_LD_OPTS, we need to turn
 # warnings off or the compilation of libffi might fail due to warnings
 	cd libffi && \
-	    PATH=$(TOP)/libffi:$$PATH; \
-	    export PATH; \
+	    $(LIBFFI_PATH_MANGLE) \
 	    cd build && \
 	    CC=$(CC_STAGE1) \
 	    LD=$(LD) \
@@ -43,9 +80,8 @@ $(libffi_STAMP_CONFIGURE):
         LDFLAGS="$(SRC_LD_OPTS) $(CONF_GCC_LINKER_OPTS_STAGE1) -w" \
         "$(SHELL)" configure \
 	          --prefix=$(TOP)/libffi/build/inst \
-	          --with-pic \
 	          --enable-static=yes \
-	          --enable-shared=no \
+	          --enable-shared=$(libffi_EnableShared) \
 	          --host=$(HOSTPLATFORM) --build=$(BUILDPLATFORM)
 
 	# wc on OS X has spaces in its output, which libffi's Makefile
@@ -53,25 +89,24 @@ $(libffi_STAMP_CONFIGURE):
 	mv libffi/build/Makefile libffi/build/Makefile.orig
 	sed "s#wc -w#wc -w | sed 's/ //g'#" < libffi/build/Makefile.orig > libffi/build/Makefile
 
-	touch $@
+	"$(TOUCH_CMD)" $@
 
-$(libffi_STAMP_BUILD): $(libffi_STAMP_CONFIGURE)
+$(libffi_STAMP_BUILD): $(libffi_STAMP_CONFIGURE) $(TOUCH_DEP)
 	$(MAKE) -C libffi/build MAKEFLAGS=
-	touch $@
+	"$(TOUCH_CMD)" $@
 
-$(libffi_STAMP_INSTALL): $(libffi_STAMP_BUILD)
+$(libffi_STAMP_INSTALL): $(libffi_STAMP_BUILD) $(TOUCH_DEP)
 	$(MAKE) -C libffi/build MAKEFLAGS= install
-	touch $@
+	"$(TOUCH_CMD)" $@
 
 $(libffi_STATIC_LIB): $(libffi_STAMP_INSTALL)
 	@test -f $@ || { echo "$< exists, but $@ does not."; echo "Suggest removing $<."; exit 1; }
 
-$(ffi_HEADER): $(libffi_STAMP_INSTALL) | $$(dir $$@)/.
-	cp libffi/build/inst/lib/libffi-*/include/ffitarget.h $(dir $@)
-	cp libffi/build/inst/lib/libffi-*/include/ffi.h $@
+$(libffi_HEADERS): $(libffi_STAMP_INSTALL) | $$(dir $$@)/.
+	cp -f libffi/build/inst/lib/libffi-*/include/$(notdir $@) $@
 
 $(eval $(call clean-target,libffi,, \
-    libffi/build libffi/stamp.ffi.* libffi/dist-install))
+    libffi/build $(wildcard libffi/stamp.ffi.*) libffi/dist-install))
 
 endif
 

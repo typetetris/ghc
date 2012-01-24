@@ -28,6 +28,7 @@ void initTracing (void);
 void endTracing  (void);
 void freeTracing (void);
 void resetTracing (void);
+void tracingAddCapapilities (nat from, nat to);
 
 #endif /* TRACING */
 
@@ -37,6 +38,7 @@ enum CapsetType { CapsetTypeCustom = CAPSET_TYPE_CUSTOM,
                   CapsetTypeOsProcess = CAPSET_TYPE_OSPROCESS,
                   CapsetTypeClockdomain = CAPSET_TYPE_CLOCKDOMAIN };
 #define CAPSET_OSPROCESS_DEFAULT 0
+#define CAPSET_CLOCKDOMAIN_DEFAULT 1
 
 // -----------------------------------------------------------------------------
 // Message classes
@@ -65,6 +67,7 @@ extern int TRACE_sched;
 extern int TRACE_gc;
 extern int TRACE_spark_sampled;
 extern int TRACE_spark_full;
+/* extern int TRACE_user; */  // only used in Trace.c
 
 // -----------------------------------------------------------------------------
 // Posting events
@@ -150,8 +153,17 @@ void trace_(char *msg, ...);
 
 /* 
  * A message or event emitted by the program
+ * Used by Debug.Trace.{traceEvent, traceEventIO}
  */
 void traceUserMsg(Capability *cap, char *msg);
+
+/*
+ * An event to record a Haskell thread's label/name
+ * Used by GHC.Conc.labelThread
+ */
+void traceThreadLabel_(Capability *cap,
+                       StgTSO     *tso,
+                       char       *label);
 
 /* 
  * Emit a debug message (only when DEBUG is defined)
@@ -195,9 +207,11 @@ void traceEventStartup_ (int n_caps);
  * the capset info events so for simplicity, rather than working out if
  * they're necessary we always emit them. They should be very low volume.
  */
-void traceCapsetModify_ (EventTypeNum tag,
-                         CapsetID capset,
-                         StgWord32 other);
+void traceCapsetEvent_ (EventTypeNum tag,
+                        CapsetID capset,
+                        StgWord info);
+
+void traceWallClockTime_(void);
 
 void traceOSProcessInfo_ (void);
 
@@ -217,8 +231,10 @@ void traceSparkCounters_ (Capability *cap,
 #define debugTrace(class, str, ...) /* nothing */
 #define debugTraceCap(class, cap, str, ...) /* nothing */
 #define traceThreadStatus(class, tso) /* nothing */
+#define traceThreadLabel_(cap, tso, label) /* nothing */
 INLINE_HEADER void traceEventStartup_ (int n_caps STG_UNUSED) {};
-#define traceCapsetModify_(tag, capset, other) /* nothing */
+#define traceCapsetEvent_(tag, capset, info) /* nothing */
+#define traceWallClockTime_() /* nothing */
 #define traceOSProcessInfo_() /* nothing */
 #define traceSparkCounters_(cap, counters, remaining) /* nothing */
 
@@ -263,6 +279,8 @@ void dtraceUserMsgWrapper(Capability *cap, char *msg);
     HASKELLEVENT_REQUEST_PAR_GC(cap)
 #define dtraceCreateSparkThread(cap, spark_tid)         \
     HASKELLEVENT_CREATE_SPARK_THREAD(cap, spark_tid)
+#define dtraceThreadLabel(cap, tso, label)              \
+    HASKELLEVENT_THREAD_LABEL(cap, tso, label)
 INLINE_HEADER void dtraceStartup (int num_caps) {
     HASKELLEVENT_STARTUP(num_caps);
 }
@@ -313,6 +331,7 @@ INLINE_HEADER void dtraceStartup (int num_caps) {
 #define dtraceRequestSeqGc(cap)                         /* nothing */
 #define dtraceRequestParGc(cap)                         /* nothing */
 #define dtraceCreateSparkThread(cap, spark_tid)         /* nothing */
+#define dtraceThreadLabel(cap, tso, label)              /* nothing */
 INLINE_HEADER void dtraceStartup (int num_caps STG_UNUSED) {};
 #define dtraceUserMsg(cap, msg)                         /* nothing */
 #define dtraceGcIdle(cap)                               /* nothing */
@@ -409,6 +428,16 @@ INLINE_HEADER void traceEventThreadWakeup(Capability *cap       STG_UNUSED,
                        (EventCapNo)other_cap);
 }
 
+INLINE_HEADER void traceThreadLabel(Capability *cap   STG_UNUSED,
+                                    StgTSO     *tso   STG_UNUSED,
+                                    char       *label STG_UNUSED)
+{
+    if (RTS_UNLIKELY(TRACE_sched)) {
+        traceThreadLabel_(cap, tso, label);
+    }
+    dtraceThreadLabel((EventCapNo)cap->no, (EventThreadID)tso->id, label);
+}
+
 INLINE_HEADER void traceEventGcStart(Capability *cap STG_UNUSED)
 {
     traceGcEvent(cap, EVENT_GC_START);
@@ -468,28 +497,34 @@ INLINE_HEADER void traceEventStartup(void)
 INLINE_HEADER void traceCapsetCreate(CapsetID   capset      STG_UNUSED,
                                      CapsetType capset_type STG_UNUSED)
 {
-    traceCapsetModify_(EVENT_CAPSET_CREATE, capset, capset_type);
+    traceCapsetEvent_(EVENT_CAPSET_CREATE, capset, capset_type);
     dtraceCapsetCreate(capset, capset_type);
 }
 
 INLINE_HEADER void traceCapsetDelete(CapsetID capset STG_UNUSED)
 {
-    traceCapsetModify_(EVENT_CAPSET_DELETE, capset, 0);
+    traceCapsetEvent_(EVENT_CAPSET_DELETE, capset, 0);
     dtraceCapsetDelete(capset);
 }
 
 INLINE_HEADER void traceCapsetAssignCap(CapsetID capset STG_UNUSED,
                                         nat      capno  STG_UNUSED)
 {
-    traceCapsetModify_(EVENT_CAPSET_ASSIGN_CAP, capset, capno);
+    traceCapsetEvent_(EVENT_CAPSET_ASSIGN_CAP, capset, capno);
     dtraceCapsetAssignCap(capset, capno);
 }
 
 INLINE_HEADER void traceCapsetRemoveCap(CapsetID capset STG_UNUSED,
                                         nat      capno  STG_UNUSED)
 {
-    traceCapsetModify_(EVENT_CAPSET_REMOVE_CAP, capset, capno);
+    traceCapsetEvent_(EVENT_CAPSET_REMOVE_CAP, capset, capno);
     dtraceCapsetRemoveCap(capset, capno);
+}
+
+INLINE_HEADER void traceWallClockTime(void)
+{
+    traceWallClockTime_();
+    /* Note: no DTrace equivalent because it is available to DTrace directly */
 }
 
 INLINE_HEADER void traceOSProcessInfo(void)

@@ -22,6 +22,14 @@
 -- * 'Id.Id': see "Id#name_types"
 --
 -- * 'Var.Var': see "Var#name_types"
+
+{-# OPTIONS -fno-warn-tabs #-}
+-- The above warning supression flag is a temporary kludge.
+-- While working on this module you are encouraged to remove it and
+-- detab the module (please do the detabbing in a separate patch). See
+--     http://hackage.haskell.org/trac/ghc/wiki/Commentary/CodingStyle#TabsvsSpaces
+-- for details
+
 module RdrName (
         -- * The main type
 	RdrName(..),	-- Constructors exported only to BinIface
@@ -32,7 +40,7 @@ module RdrName (
 	nameRdrName, getRdrName, 
 
 	-- ** Destruction
-	rdrNameOcc, rdrNameSpace, setRdrNameSpace,
+	rdrNameOcc, rdrNameSpace, setRdrNameSpace, demoteRdrName,
 	isRdrDataCon, isRdrTyVar, isRdrTc, isQual, isQual_maybe, isUnqual, 
 	isOrig, isOrig_maybe, isExact, isExact_maybe, isSrcRdrName,
 
@@ -151,6 +159,14 @@ setRdrNameSpace (Orig m occ) ns = Orig m (setOccNameSpace ns occ)
 setRdrNameSpace (Exact n)    ns = ASSERT( isExternalName n ) 
 		       	          Orig (nameModule n)
 				       (setOccNameSpace ns (nameOccName n))
+
+-- demoteRdrName lowers the NameSpace of RdrName.
+-- see Note [Demotion] in OccName
+demoteRdrName :: RdrName -> Maybe RdrName
+demoteRdrName (Unqual occ) = fmap Unqual (demoteOccName occ)
+demoteRdrName (Qual m occ) = fmap (Qual m) (demoteOccName occ)
+demoteRdrName (Orig _ _) = panic "demoteRdrName"
+demoteRdrName (Exact _) = panic "demoteRdrName"
 \end{code}
 
 \begin{code}
@@ -256,6 +272,9 @@ instance OutputableBndr RdrName where
     pprBndr _ n 
 	| isTvOcc (rdrNameOcc n) = char '@' <+> ppr n
 	| otherwise		 = ppr n
+
+    pprInfixOcc  rdr = pprInfixVar  (isSymOcc (rdrNameOcc rdr)) (ppr rdr)
+    pprPrefixOcc rdr = pprPrefixVar (isSymOcc (rdrNameOcc rdr)) (ppr rdr)
 
 showRdrName :: RdrName -> String
 showRdrName r = showSDoc (ppr r)
@@ -487,6 +506,7 @@ pickGREs :: RdrName -> [GlobalRdrElt] -> [GlobalRdrElt]
 -- ^ Take a list of GREs which have the right OccName
 -- Pick those GREs that are suitable for this RdrName
 -- And for those, keep only only the Provenances that are suitable
+-- Only used for Qual and Unqual, not Orig or Exact
 -- 
 -- Consider:
 --
@@ -503,7 +523,8 @@ pickGREs :: RdrName -> [GlobalRdrElt] -> [GlobalRdrElt]
 -- the locally-defined @f@, and a GRE for the imported @f@, with a /single/ 
 -- provenance, namely the one for @Baz(f)@.
 pickGREs rdr_name gres
-  = mapCatMaybes pick gres
+  = ASSERT2( isSrcRdrName rdr_name, ppr rdr_name )
+    mapCatMaybes pick gres
   where
     rdr_is_unqual = isUnqual rdr_name
     rdr_is_qual   = isQual_maybe rdr_name

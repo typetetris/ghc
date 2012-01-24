@@ -32,6 +32,13 @@
 -- A useful example pass over Cmm is in nativeGen/MachCodeGen.hs
 --
 
+{-# OPTIONS -fno-warn-tabs #-}
+-- The above warning supression flag is a temporary kludge.
+-- While working on this module you are encouraged to remove it and
+-- detab the module (please do the detabbing in a separate patch). See
+--     http://hackage.haskell.org/trac/ghc/wiki/Commentary/CodingStyle#TabsvsSpaces
+-- for details
+
 module PprCmmExpr
     ( pprExpr, pprLit
     , pprExpr9 {-only to import in OldPprCmm. When it dies, remove the export -}
@@ -264,6 +271,7 @@ pprGlobalReg gr
         SpLim          -> ptext (sLit "SpLim")
         Hp             -> ptext (sLit "Hp")
         HpLim          -> ptext (sLit "HpLim")
+        CCCS           -> ptext (sLit "CCCS")
         CurrentTSO     -> ptext (sLit "CurrentTSO")
         CurrentNursery -> ptext (sLit "CurrentNursery")
         HpAlloc        -> ptext (sLit "HpAlloc")

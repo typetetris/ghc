@@ -9,6 +9,13 @@ with {\em closures} on the RHSs of let(rec)s.  See also
 @CgCon@, which deals with constructors.
 
 \begin{code}
+{-# OPTIONS -fno-warn-tabs #-}
+-- The above warning supression flag is a temporary kludge.
+-- While working on this module you are encouraged to remove it and
+-- detab the module (please do the detabbing in a separate patch). See
+--     http://hackage.haskell.org/trac/ghc/wiki/Commentary/CodingStyle#TabsvsSpaces
+-- for details
+
 module CgClosure ( cgTopRhsClosure, 
 		   cgStdRhsClosure, 
 		   cgRhsClosure,
@@ -108,7 +115,7 @@ cgStdRhsClosure
 	-> [StgArg]		-- payload
 	-> FCode (Id, CgIdInfo)
 
-cgStdRhsClosure bndr cc _bndr_info _fvs args body lf_info payload 
+cgStdRhsClosure bndr _cc _bndr_info _fvs _args _body lf_info payload
   = do	-- AHA!  A STANDARD-FORM THUNK
   {	-- LAY OUT THE OBJECT
     amodes <- getArgAmodes payload
@@ -122,10 +129,10 @@ cgStdRhsClosure bndr cc _bndr_info _fvs args body lf_info payload
 				     NoC_SRT	-- No SRT for a std-form closure
 				     descr
 		
-  ; (use_cc, blame_cc) <- chooseDynCostCentres cc args body
+--  ; (use_cc, blame_cc) <- chooseDynCostCentres cc args body
 
 	-- BUILD THE OBJECT
-  ; heap_offset <- allocDynClosure closure_info use_cc blame_cc amodes_w_offsets
+  ; heap_offset <- allocDynClosure closure_info curCCS curCCS amodes_w_offsets
 
 	-- RETURN
   ; returnFC (bndr, heapIdInfo bndr heap_offset lf_info) }
@@ -197,9 +204,9 @@ cgRhsClosure bndr cc bndr_info fvs upd_flag args body = do
   ; let
 	to_amode (info, offset) = do { amode <- idInfoToAmode info
 				     ; return (amode, offset) }
-  ; (use_cc, blame_cc) <- chooseDynCostCentres cc args body
+--  ; (use_cc, blame_cc) <- chooseDynCostCentres cc args body
   ; amodes_w_offsets <- mapFCs to_amode bind_details
-  ; heap_offset <- allocDynClosure closure_info use_cc blame_cc amodes_w_offsets
+  ; heap_offset <- allocDynClosure closure_info curCCS curCCS amodes_w_offsets
 
 	-- RETURN
   ; returnFC (bndr, heapIdInfo bndr heap_offset lf_info) }
@@ -239,16 +246,15 @@ So it should set up an update frame (if it is shared).
 NB: Thunks cannot have a primitive type!
 
 \begin{code}
-closureCodeBody _binder_info cl_info cc [{- No args i.e. thunk -}] body = do
+closureCodeBody _binder_info cl_info _cc [{- No args i.e. thunk -}] body = do
   { body_absC <- getCgStmts $ do
 	{ tickyEnterThunk cl_info
 	; ldvEnterClosure cl_info  -- NB: Node always points when profiling
 	; thunkWrapper cl_info $ do
 		-- We only enter cc after setting up update so
 		-- that cc of enclosing scope will be recorded
-		-- in update frame CAF/DICT functions will be
-		-- subsumed by this enclosing cc
-	    { enterCostCentre cl_info cc body
+                -- in the update frame
+            { enterCostCentreThunk (CmmReg nodeReg)
 	    ; cgExpr body }
 	}
     
@@ -307,16 +313,15 @@ mkFunEntryCode cl_info cc reg_args stk_args sp_top reg_save_code body = do
   ; bindArgsToStack stk_args
   ; setRealAndVirtualSp sp_top
 
-	-- Enter the cost-centre, if required
-	-- ToDo: It's not clear why this is outside the funWrapper,
-	--	 but the tickyEnterFun is inside. Perhaps we can put
-	--	 them together?
-  ; enterCostCentre cl_info cc body
-
-	-- Do the business
+        -- Do the business
   ; funWrapper cl_info reg_args reg_save_code $ do
 	{ tickyEnterFun cl_info
-	; cgExpr body }
+        ; enterCostCentreFun cc
+              (CmmMachOp mo_wordSub [ CmmReg nodeReg
+                                    , CmmLit (mkIntCLit (funTag cl_info)) ])
+              (node : map snd reg_args) -- live regs
+
+        ; cgExpr body }
   }
 \end{code}
 
@@ -357,6 +362,7 @@ mkSlowEntryCode cl_info reg_args
 	= mapAccumL (\off (rep,_) -> (off + cgRepSizeW rep, off))
 		    0 reps_w_regs
 
+
      load_assts = zipWithEqual "mk_load" mk_load reps_w_regs stk_offsets
      mk_load (rep,reg) offset = CmmAssign (CmmGlobal reg) 
 					  (CmmLoad (cmmRegOffW spReg offset)
@@ -369,7 +375,8 @@ mkSlowEntryCode cl_info reg_args
 
      stk_adj_pop   = CmmAssign spReg (cmmRegOffW spReg final_stk_offset)
      stk_adj_push  = CmmAssign spReg (cmmRegOffW spReg (- final_stk_offset))
-     jump_to_entry = CmmJump (mkLblExpr (enterLocalIdLabel name has_caf_refs)) []
+     live_regs     = Just $ map snd reps_w_regs
+     jump_to_entry = CmmJump (mkLblExpr (entryLabelFromCI cl_info)) live_regs
 \end{code}
 
 
@@ -407,6 +414,7 @@ funWrapper :: ClosureInfo 	-- Closure whose code body this is
 	   -> Code
 funWrapper closure_info arg_regs reg_save_code fun_body = do
   { let node_points = nodeMustPointToIt (closureLFInfo closure_info)
+        live        = Just $ map snd arg_regs
 
   {-
         -- Debugging: check that R1 has the correct tag
@@ -426,8 +434,7 @@ funWrapper closure_info arg_regs reg_save_code fun_body = do
   ; granYield arg_regs node_points
 
         -- Heap and/or stack checks wrap the function body
-  ; funEntryChecks closure_info reg_save_code 
-		   fun_body
+  ; funEntryChecks closure_info reg_save_code live fun_body
   }
 \end{code}
 
@@ -478,7 +485,7 @@ emitBlackHoleCode is_single_entry = do
     stmtsC [
        CmmStore (cmmOffsetW (CmmReg nodeReg) fixedHdrSize)
                 (CmmReg (CmmGlobal CurrentTSO)),
-       CmmCall (CmmPrim MO_WriteBarrier) [] [] CmmUnsafe CmmMayReturn,
+       CmmCall (CmmPrim MO_WriteBarrier) [] [] CmmMayReturn,
        CmmStore (CmmReg nodeReg) (CmmReg (CmmGlobal EagerBlackholeInfo))
      ]
 \end{code}
@@ -576,7 +583,7 @@ link_caf cl_info _is_upd = do
       [ CmmHinted (CmmReg (CmmGlobal BaseReg)) AddrHint,
         CmmHinted (CmmReg nodeReg) AddrHint,
         CmmHinted hp_rel AddrHint ]
-      (Just [node]) False
+      (Just [node])
 	-- node is live, so save it.
 
   -- see Note [atomic CAF entry] in rts/sm/Storage.c
@@ -585,7 +592,7 @@ link_caf cl_info _is_upd = do
         -- assuming lots of things, like the stack pointer hasn't
         -- moved since we entered the CAF.
         let target = entryCode (closureInfoPtr (CmmReg nodeReg)) in
-        stmtC (CmmJump target [])
+        stmtC (CmmJump target $ Just [node])
 
   ; returnFC hp_rel }
   where

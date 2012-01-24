@@ -9,10 +9,8 @@ module Vectorise.Env (
   GlobalEnv(..),
   initGlobalEnv,
   extendImportedVarsEnv,
-  setFamEnv,
   extendFamEnv,
-  extendTyConsEnv,
-  extendPAFunsEnv,
+  setPAFunsEnv,
   setPRFunsEnv,
   modVectInfo
 ) where
@@ -22,6 +20,7 @@ import InstEnv
 import FamInstEnv
 import CoreSyn
 import Type
+import Class
 import TyCon
 import DataCon
 import VarEnv
@@ -32,15 +31,20 @@ import Name
 import NameEnv
 import FastString
 
+import Data.Maybe
 
--- | Indicates what scope something (a variable) is in.
+
+-- |Indicates what scope something (a variable) is in.
+--
 data Scope a b 
         = Global a 
         | Local  b
 
 
 -- LocalEnv -------------------------------------------------------------------
--- | The local environment.
+
+-- |The local environment.
+--
 data LocalEnv
   = LocalEnv {
         -- Mapping from local variables to their vectorised and lifted versions.
@@ -56,8 +60,8 @@ data LocalEnv
         , local_bind_name :: FastString
         }
 
-
--- | Create an empty local environment.
+-- |Create an empty local environment.
+--
 emptyLocalEnv :: LocalEnv
 emptyLocalEnv = LocalEnv {
                    local_vars     = emptyVarEnv
@@ -94,6 +98,9 @@ data GlobalEnv
           -- *without* a right-hand side in the current or an imported module as well as type
           -- constructors that are automatically identified as scalar by the vectoriser (in
           -- 'Vectorise.Type.Env').  Scalar code may only operate on such data.
+          --
+          -- NB: Not all type constructors in that set are members of the 'Scalar' type class
+          --     (which can be trivially marshalled across scalar code boundaries).
         
         , global_novect_vars          :: VarSet
           -- ^Variables that are not vectorised.  (They may be referenced in the right-hand sides
@@ -124,6 +131,10 @@ data GlobalEnv
 
 -- |Create an initial global environment.
 --
+-- We add scalar variables and type constructors identified by vectorisation pragmas already here
+-- to the global table, so that we can query scalarness during vectorisation, and especially, when
+-- vectorising the scalar entities' definitions themselves.
+--
 initGlobalEnv :: VectInfo -> [CoreVect] -> (InstEnv, InstEnv) -> FamInstEnvs -> GlobalEnv
 initGlobalEnv info vectDecls instEnvs famInstEnvs
   = GlobalEnv 
@@ -134,7 +145,7 @@ initGlobalEnv info vectDecls instEnvs famInstEnvs
   , global_novect_vars          = mkVarSet novects
   , global_tycons               = mapNameEnv snd $ vectInfoTyCon info
   , global_datacons             = mapNameEnv snd $ vectInfoDataCon info
-  , global_pa_funs              = mapNameEnv snd $ vectInfoPADFun info
+  , global_pa_funs              = emptyNameEnv
   , global_pr_funs              = emptyNameEnv
   , global_inst_env             = instEnvs
   , global_fam_inst_env         = famInstEnvs
@@ -146,9 +157,16 @@ initGlobalEnv info vectDecls instEnvs famInstEnvs
                                         -- FIXME: we currently only allow RHSes consisting of a
                                         --   single variable to be able to obtain the type without
                                         --   inference — see also 'TcBinds.tcVect'
-    scalar_vars   = [var              | Vect     var   Nothing                  <- vectDecls]
-    novects       = [var              | NoVect   var                            <- vectDecls]
-    scalar_tycons = [tyConName tycon  | VectType True tycon _                   <- vectDecls]
+    scalar_vars   = [var              | Vect     var   Nothing                   <- vectDecls] ++
+                    [var              | VectInst var                             <- vectDecls]
+    novects       = [var              | NoVect   var                             <- vectDecls]
+    scalar_tycons = [tyConName tycon  | VectType True tycon Nothing              <- vectDecls] ++
+                    [tyConName tycon  | VectType _    tycon (Just tycon')        <- vectDecls
+                                      , tycon == tycon']
+                      -- - for 'VectType True tycon Nothing', we checked that the type does not
+                      --   contain arrays (or type variables that could be instatiated to arrays)
+                      -- - for 'VectType _ tycon (Just tycon')', where the two tycons are the same,
+                      --   we also know that there can be no embedded arrays
 
 
 -- Operators on Global Environments -------------------------------------------
@@ -159,13 +177,6 @@ extendImportedVarsEnv :: [(Var, Var)] -> GlobalEnv -> GlobalEnv
 extendImportedVarsEnv ps genv
   = genv { global_vars = extendVarEnvList (global_vars genv) ps }
 
--- |Set the list of type family instances in an environment.
---
-setFamEnv :: FamInstEnv -> GlobalEnv -> GlobalEnv
-setFamEnv l_fam_inst genv
-  = genv { global_fam_inst_env = (g_fam_inst, l_fam_inst) }
-  where (g_fam_inst, _) = global_fam_inst_env genv
-
 -- |Extend the list of type family instances.
 --
 extendFamEnv :: [FamInst] -> GlobalEnv -> GlobalEnv
@@ -173,23 +184,15 @@ extendFamEnv new genv
   = genv { global_fam_inst_env = (g_fam_inst, extendFamInstEnvList l_fam_inst new) }
   where (g_fam_inst, l_fam_inst) = global_fam_inst_env genv
 
--- |Extend the list of type constructors in an environment.
+-- |Set the list of PA functions in an environment.
 --
-extendTyConsEnv :: [(Name, TyCon)] -> GlobalEnv -> GlobalEnv
-extendTyConsEnv ps genv
-  = genv { global_tycons = extendNameEnvList (global_tycons genv) ps }
-
--- |Extend the list of PA functions in an environment.
---
-extendPAFunsEnv :: [(Name, Var)] -> GlobalEnv -> GlobalEnv
-extendPAFunsEnv ps genv
-  = genv { global_pa_funs = extendNameEnvList (global_pa_funs genv) ps }
+setPAFunsEnv :: [(Name, Var)] -> GlobalEnv -> GlobalEnv
+setPAFunsEnv ps genv = genv { global_pa_funs = mkNameEnv ps }
 
 -- |Set the list of PR functions in an environment.
 --
 setPRFunsEnv :: [(Name, Var)] -> GlobalEnv -> GlobalEnv
-setPRFunsEnv ps genv
-  = genv { global_pr_funs = mkNameEnv ps }
+setPRFunsEnv ps genv = genv { global_pr_funs = mkNameEnv ps }
 
 -- |Compute vectorisation information that goes into 'ModGuts' (and is stored in interface files).
 -- The incoming 'vectInfo' is that from the 'HscEnv' and 'EPS'.  The outgoing one contains only the
@@ -197,24 +200,30 @@ setPRFunsEnv ps genv
 -- data constructors referenced in VECTORISE pragmas, even if they are defined in an imported
 -- module.
 --
-modVectInfo :: GlobalEnv -> [TyCon] -> [CoreVect]-> VectInfo -> VectInfo
-modVectInfo env tycons vectDecls info
+-- The variables explicitly include class selectors and dfuns.
+--
+modVectInfo :: GlobalEnv -> [Id] -> [TyCon] -> [CoreVect]-> VectInfo -> VectInfo
+modVectInfo env mg_ids mg_tyCons vectDecls info
   = info 
     { vectInfoVar          = mk_env ids      (global_vars     env)
     , vectInfoTyCon        = mk_env tyCons   (global_tycons   env)
     , vectInfoDataCon      = mk_env dataCons (global_datacons env)
-    , vectInfoPADFun       = mk_env tyCons   (global_pa_funs  env)
     , vectInfoScalarVars   = global_scalar_vars   env `minusVarSet`  vectInfoScalarVars   info
     , vectInfoScalarTyCons = global_scalar_tycons env `minusNameSet` vectInfoScalarTyCons info
     }
   where
-    vectIds        = [id    | Vect     id    _   <- vectDecls]
-    vectTypeTyCons = [tycon | VectType _ tycon _ <- vectDecls]
-    vectDataCons   = concatMap tyConDataCons vectTypeTyCons
-    ids            = {- typeEnvIds      tyenv ++ -} vectIds
-                     -- XXX: what Ids do you want here?
-    tyCons         = tycons ++ vectTypeTyCons
-    dataCons       = concatMap tyConDataCons tycons ++ vectDataCons
+    vectIds         = [id    | Vect     id    _   <- vectDecls] ++
+                      [id    | VectInst id        <- vectDecls]
+    vectTypeTyCons  = [tycon | VectType _ tycon _ <- vectDecls] ++
+                      [tycon | VectClass tycon    <- vectDecls]
+    vectDataCons    = concatMap tyConDataCons vectTypeTyCons
+    ids             = mg_ids ++ vectIds ++ dataConIds ++ selIds
+    tyCons          = mg_tyCons ++ vectTypeTyCons
+    dataCons        = concatMap tyConDataCons mg_tyCons ++ vectDataCons
+    dataConIds      = map dataConWorkId dataCons
+    selIds          = concat [ classAllSelIds cls 
+                             | tycon <- tyCons
+                             , cls <- maybeToList . tyConClass_maybe $ tycon]
     
     -- Produce an entry for every declaration that is mentioned in the domain of the 'inspectedEnv'
     mk_env decls inspectedEnv

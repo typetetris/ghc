@@ -14,6 +14,13 @@ which deal with the intantiated versions are located elsewhere:
    Id			typecheck/TcHsSyn	
 
 \begin{code}
+{-# OPTIONS -fno-warn-tabs #-}
+-- The above warning supression flag is a temporary kludge.
+-- While working on this module you are encouraged to remove it and
+-- detab the module (please do the detabbing in a separate patch). See
+--     http://hackage.haskell.org/trac/ghc/wiki/Commentary/CodingStyle#TabsvsSpaces
+-- for details
+
 module HsUtils(
   -- Terms
   mkHsPar, mkHsApp, mkHsConApp, mkSimpleHsAlt,
@@ -44,7 +51,7 @@ module HsUtils(
 
   -- Stmts
   mkTransformStmt, mkTransformByStmt, mkExprStmt, mkBindStmt, mkLastStmt,
-  emptyTransStmt, mkGroupUsingStmt, mkGroupByStmt, mkGroupByUsingStmt, 
+  emptyTransStmt, mkGroupUsingStmt, mkGroupByUsingStmt, 
   emptyRecStmt, mkRecStmt, 
 
   -- Template Haskell
@@ -75,9 +82,9 @@ import HsPat
 import HsTypes	
 import HsLit
 
+import TcEvidence
 import RdrName
 import Var
-import Coercion
 import TypeRep
 import DataCon
 import Name
@@ -165,37 +172,6 @@ mkParPat :: LPat name -> LPat name
 mkParPat lp@(L loc p) | hsPatNeedsParens p = L loc (ParPat lp)
                       | otherwise          = lp
 
---------- HsWrappers: type args, dict args, casts ---------
-mkLHsWrap :: HsWrapper -> LHsExpr id -> LHsExpr id
-mkLHsWrap co_fn (L loc e) = L loc (mkHsWrap co_fn e)
-
-mkHsWrap :: HsWrapper -> HsExpr id -> HsExpr id
-mkHsWrap co_fn e | isIdHsWrapper co_fn = e
-		 | otherwise	       = HsWrap co_fn e
-
-mkHsWrapCo :: LCoercion -> HsExpr id -> HsExpr id
-mkHsWrapCo (Refl _) e = e
-mkHsWrapCo co       e = mkHsWrap (WpCast co) e
-
-mkLHsWrapCo :: LCoercion -> LHsExpr id -> LHsExpr id
-mkLHsWrapCo (Refl _) e         = e
-mkLHsWrapCo co       (L loc e) = L loc (mkHsWrap (WpCast co) e)
-
-coToHsWrapper :: LCoercion -> HsWrapper
-coToHsWrapper (Refl _) = idHsWrapper
-coToHsWrapper co       = WpCast co
-
-mkHsWrapPat :: HsWrapper -> Pat id -> Type -> Pat id
-mkHsWrapPat co_fn p ty | isIdHsWrapper co_fn = p
-		       | otherwise	     = CoPat co_fn p ty
-
-mkHsWrapPatCo :: LCoercion -> Pat id -> Type -> Pat id
-mkHsWrapPatCo (Refl _) pat _  = pat
-mkHsWrapPatCo co       pat ty = CoPat (WpCast co) pat ty
-
-mkHsDictLet :: TcEvBinds -> LHsExpr Id -> LHsExpr Id
-mkHsDictLet ev_binds expr = mkLHsWrap (mkWpLet ev_binds) expr
-
 
 -------------------------------
 -- These are the bits of syntax that contain rebindable names
@@ -236,10 +212,9 @@ mkHsIf c a b = HsIf (Just noSyntaxExpr) c a b
 mkNPat lit neg     = NPat lit neg noSyntaxExpr
 mkNPlusKPat id lit = NPlusKPat id lit noSyntaxExpr noSyntaxExpr
 
-mkTransformStmt   :: [LStmt idL] -> LHsExpr idR                -> StmtLR idL idR
-mkTransformByStmt :: [LStmt idL] -> LHsExpr idR -> LHsExpr idR -> StmtLR idL idR
+mkTransformStmt    :: [LStmt idL] -> LHsExpr idR                -> StmtLR idL idR
+mkTransformByStmt  :: [LStmt idL] -> LHsExpr idR -> LHsExpr idR -> StmtLR idL idR
 mkGroupUsingStmt   :: [LStmt idL]                -> LHsExpr idR -> StmtLR idL idR
-mkGroupByStmt      :: [LStmt idL] -> LHsExpr idR                -> StmtLR idL idR
 mkGroupByUsingStmt :: [LStmt idL] -> LHsExpr idR -> LHsExpr idR -> StmtLR idL idR
 
 emptyTransStmt :: StmtLR idL idR
@@ -247,12 +222,10 @@ emptyTransStmt = TransStmt { trS_form = undefined, trS_stmts = [], trS_bndrs = [
                            , trS_by = Nothing, trS_using = noLoc noSyntaxExpr
                            , trS_ret = noSyntaxExpr, trS_bind = noSyntaxExpr
                            , trS_fmap = noSyntaxExpr }
-mkTransformStmt   ss u    = emptyTransStmt { trS_form = ThenForm, trS_stmts = ss, trS_using = u }
-mkTransformByStmt ss u b  = emptyTransStmt { trS_form = ThenForm, trS_stmts = ss, trS_using = u, trS_by = Just b }
-mkGroupByStmt      ss b   = emptyTransStmt { trS_form = GroupFormB, trS_stmts = ss, trS_by = Just b }
-mkGroupUsingStmt   ss u   = emptyTransStmt { trS_form = GroupFormU, trS_stmts = ss, trS_using = u }
-mkGroupByUsingStmt ss b u = emptyTransStmt { trS_form = GroupFormU, trS_stmts = ss
-                                           , trS_by = Just b, trS_using = u }
+mkTransformStmt    ss u   = emptyTransStmt { trS_form = ThenForm,  trS_stmts = ss, trS_using = u }
+mkTransformByStmt  ss u b = emptyTransStmt { trS_form = ThenForm,  trS_stmts = ss, trS_using = u, trS_by = Just b }
+mkGroupUsingStmt   ss u   = emptyTransStmt { trS_form = GroupForm, trS_stmts = ss, trS_using = u }
+mkGroupByUsingStmt ss b u = emptyTransStmt { trS_form = GroupForm, trS_stmts = ss, trS_using = u, trS_by = Just b }
 
 mkLastStmt expr	    = LastStmt expr noSyntaxExpr
 mkExprStmt expr	    = ExprStmt expr noSyntaxExpr noSyntaxExpr placeHolderType
@@ -260,7 +233,7 @@ mkBindStmt pat expr = BindStmt pat expr noSyntaxExpr noSyntaxExpr
 
 emptyRecStmt = RecStmt { recS_stmts = [], recS_later_ids = [], recS_rec_ids = []
                        , recS_ret_fn = noSyntaxExpr, recS_mfix_fn = noSyntaxExpr
-		       , recS_bind_fn = noSyntaxExpr
+                       , recS_bind_fn = noSyntaxExpr, recS_later_rets = []
                        , recS_rec_rets = [], recS_ret_ty = placeHolderType }
 
 mkRecStmt stmts = emptyRecStmt { recS_stmts = stmts }
@@ -400,6 +373,39 @@ missingTupArg :: HsTupArg a
 missingTupArg = Missing placeHolderType
 \end{code}
 
+\begin{code}
+--------- HsWrappers: type args, dict args, casts ---------
+mkLHsWrap :: HsWrapper -> LHsExpr id -> LHsExpr id
+mkLHsWrap co_fn (L loc e) = L loc (mkHsWrap co_fn e)
+
+mkHsWrap :: HsWrapper -> HsExpr id -> HsExpr id
+mkHsWrap co_fn e | isIdHsWrapper co_fn = e
+		 | otherwise	       = HsWrap co_fn e
+
+mkHsWrapCo :: TcCoercion -> HsExpr id -> HsExpr id
+mkHsWrapCo co e | isTcReflCo co = e
+                | otherwise     = mkHsWrap (WpCast co) e
+
+mkLHsWrapCo :: TcCoercion -> LHsExpr id -> LHsExpr id
+mkLHsWrapCo co (L loc e) | isTcReflCo co = L loc e
+                         | otherwise     = L loc (mkHsWrap (WpCast co) e)
+
+coToHsWrapper :: TcCoercion -> HsWrapper
+coToHsWrapper co | isTcReflCo co = idHsWrapper
+                 | otherwise     = WpCast co
+
+mkHsWrapPat :: HsWrapper -> Pat id -> Type -> Pat id
+mkHsWrapPat co_fn p ty | isIdHsWrapper co_fn = p
+		       | otherwise	     = CoPat co_fn p ty
+
+mkHsWrapPatCo :: TcCoercion -> Pat id -> Type -> Pat id
+mkHsWrapPatCo co pat ty | isTcReflCo co = pat
+                        | otherwise     = CoPat (WpCast co) pat ty
+
+mkHsDictLet :: TcEvBinds -> LHsExpr Id -> LHsExpr Id
+mkHsDictLet ev_binds expr = mkLHsWrap (mkWpLet ev_binds) expr
+\end{code}
+l
 %************************************************************************
 %*									*
 		Bindings; with a location at the top

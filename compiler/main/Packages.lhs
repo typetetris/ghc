@@ -2,6 +2,13 @@
 % (c) The University of Glasgow, 2006
 %
 \begin{code}
+{-# OPTIONS -fno-warn-tabs #-}
+-- The above warning supression flag is a temporary kludge.
+-- While working on this module you are encouraged to remove it and
+-- detab the module (please do the detabbing in a separate patch). See
+--     http://hackage.haskell.org/trac/ghc/wiki/Commentary/CodingStyle#TabsvsSpaces
+-- for details
+
 -- | Package manipulation
 module Packages (
 	module PackageConfig,
@@ -14,7 +21,7 @@ module Packages (
 	PackageState(..),
 	initPackages,
 	getPackageDetails,
-        lookupModuleInAllPackages, lookupModuleWithSuggestions,
+	lookupModuleInAllPackages, lookupModuleWithSuggestions,
 
 	-- * Inspecting the set of packages in scope
 	getPackageIncludePath,
@@ -52,7 +59,7 @@ import Distribution.InstalledPackageInfo
 import Distribution.InstalledPackageInfo.Binary
 import Distribution.Package hiding (PackageId,depends)
 import FastString
-import ErrUtils         ( debugTraceMsg, putMsg, Message )
+import ErrUtils         ( debugTraceMsg, putMsg, MsgDoc )
 import Exception
 
 import System.Directory
@@ -717,13 +724,7 @@ mkPackageState dflags pkgs0 preload0 this_package = do
 -}
 
   let
-      flags = reverse (packageFlags dflags) ++ dphPackage
-      -- expose the appropriate DPH backend library
-      dphPackage = case dphBackend dflags of
-                     DPHPar  -> [ExposePackage "dph-prim-par", ExposePackage "dph-par"]
-                     DPHSeq  -> [ExposePackage "dph-prim-seq", ExposePackage "dph-seq"]
-                     DPHThis -> []
-                     DPHNone -> []
+      flags = reverse (packageFlags dflags)
 
       -- pkgs0 with duplicate packages filtered out.  This is
       -- important: it is possible for a package in the global package
@@ -985,7 +986,7 @@ closeDeps :: PackageConfigMap
           -> IO [PackageId]
 closeDeps pkg_map ipid_map ps = throwErr (closeDepsErr pkg_map ipid_map ps)
 
-throwErr :: MaybeErr Message a -> IO a
+throwErr :: MaybeErr MsgDoc a -> IO a
 throwErr m = case m of
 		Failed e    -> ghcError (CmdLineError (showSDoc e))
 		Succeeded r -> return r
@@ -993,7 +994,7 @@ throwErr m = case m of
 closeDepsErr :: PackageConfigMap
              -> Map InstalledPackageId PackageId
              -> [(PackageId,Maybe PackageId)]
-             -> MaybeErr Message [PackageId]
+             -> MaybeErr MsgDoc [PackageId]
 closeDepsErr pkg_map ipid_map ps = foldM (add_package pkg_map ipid_map) [] ps
 
 -- internal helper
@@ -1001,7 +1002,7 @@ add_package :: PackageConfigMap
             -> Map InstalledPackageId PackageId
             -> [PackageId]
             -> (PackageId,Maybe PackageId)
-            -> MaybeErr Message [PackageId]
+            -> MaybeErr MsgDoc [PackageId]
 add_package pkg_db ipid_map ps (p, mb_parent)
   | p `elem` ps = return ps	-- Check if we've already added this package
   | otherwise =

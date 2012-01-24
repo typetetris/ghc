@@ -3,7 +3,7 @@ dnl (run "grep '^dnl \*' configure.ac | sed -e 's/dnl / /g; s/\*\*/   +/g;'"
 dnl  (or some such) to see the outline of this file)
 dnl
 #
-# (c) The University of Glasgow 1994-2004
+# (c) The University of Glasgow 1994-2012
 #
 # Configure script template for GHC
 #
@@ -13,16 +13,16 @@ dnl
 # see what flags are available. (Better yet, read the documentation!)
 #
 
-AC_INIT([The Glorious Glasgow Haskell Compilation System], [7.3], [glasgow-haskell-bugs@haskell.org], [ghc])
+AC_INIT([The Glorious Glasgow Haskell Compilation System], [7.5], [glasgow-haskell-bugs@haskell.org], [ghc])
 
 # Set this to YES for a released version, otherwise NO
 : ${RELEASE=NO}
 
-# The primary version (e.g. 6.7, 6.6.1) is set in the AC_INIT line
+# The primary version (e.g. 7.5, 7.4.1) is set in the AC_INIT line
 # above.  If this is not a released version, then we will append the
-# date to the version number (e.g. 6.7.20070204).  The date is
+# date to the version number (e.g. 7.4.20111220).  The date is
 # constructed by finding the date of the most recent patch in the
-# darcs repository.  If this is a source distribution (not a darcs
+# git repository.  If this is a source distribution (not a git
 # checkout), then we ship a file 'VERSION' containing the full version
 # when the source distribution was created.
 
@@ -130,8 +130,6 @@ if test "$WithGhc" != ""; then
   AC_SUBST(GhcPatchLevel)dnl
   GhcMinVersion2=`echo "$GhcMinVersion" | sed 's/^\\(.\\)$/0\\1/'`
   GhcCanonVersion="$GhcMajVersion$GhcMinVersion2"
-  if test $GhcCanonVersion -ge 613; then ghc_ge_613=YES; else ghc_ge_613=NO; fi
-  AC_SUBST(ghc_ge_613)dnl
 
   BOOTSTRAPPING_GHC_INFO_FIELD([CC_STAGE0],[C compiler command],['$(CC)'])
   BOOTSTRAPPING_GHC_INFO_FIELD([AR_STAGE0],[ar command],['$(AR)'])
@@ -144,8 +142,8 @@ if test "$BootingFromHc" = "NO"; then
   if test "$WithGhc" = ""; then
      AC_MSG_ERROR([GHC is required unless bootstrapping from .hc files.])
   fi
-  FP_COMPARE_VERSIONS([$GhcVersion],[-lt],[6.12],
-    [AC_MSG_ERROR([GHC version 6.12 or later is required to compile GHC.])])dnl
+  FP_COMPARE_VERSIONS([$GhcVersion],[-lt],[7.0],
+    [AC_MSG_ERROR([GHC version 7.0 or later is required to compile GHC.])])dnl
 
   if test `expr $GhcMinVersion % 2` = "1"; then
      if test "$EnableBootstrapWithDevelSnaphost" = "NO"; then
@@ -259,7 +257,7 @@ then
     NM="$hardtop/inplace/mingw/bin/nm.exe"
     fp_prog_ar_raw="$hardtop/inplace/mingw/bin/ar.exe"
 
-    # NB. If you update the tarbballs to a new version of gcc, don't
+    # NB. If you update the tarballs to a new version of gcc, don't
     # forget to tweak the paths in driver/gcc/gcc.c.
     if ! test -d inplace/mingw ||
          test inplace/mingw -ot ghc-tarballs/mingw/binutils*.tar.lzma  ||
@@ -351,6 +349,18 @@ FP_ARG_WITH_PATH_GNU_PROG([NM], [nm])
 NmCmd="$NM"
 AC_SUBST([NmCmd])
 
+dnl ** Which LLVM llc to use?
+dnl --------------------------------------------------------------
+FP_ARG_WITH_PATH_GNU_PROG_OPTIONAL([LLC], [llc])
+LlcCmd="$LLC"
+AC_SUBST([LlcCmd])
+
+dnl ** Which LLVM opt to use?
+dnl --------------------------------------------------------------
+FP_ARG_WITH_PATH_GNU_PROG_OPTIONAL([OPT], [opt])
+OptCmd="$OPT"
+AC_SUBST([OptCmd])
+
 dnl ** Mac OS X: explicit deployment target
 dnl --------------------------------------------------------------
 AC_ARG_WITH([macosx-deployment-target],
@@ -420,6 +430,13 @@ dnl     If gcc, make sure it's at least 2.1
 dnl
 FP_GCC_VERSION
 
+dnl ** look to see if we have a C compiler using an llvm back end.
+dnl
+FP_CC_LLVM_BACKEND
+
+FP_PROG_LD_HashSize31
+FP_PROG_LD_ReduceMemoryOverheads
+
 FPTOOLS_SET_C_LD_FLAGS([target],[CFLAGS],[LDFLAGS],[IGNORE_LINKER_LD_FLAGS],[CPPFLAGS])
 FPTOOLS_SET_C_LD_FLAGS([build],[CONF_CC_OPTS_STAGE0],[CONF_GCC_LINKER_OPTS_STAGE0],[CONF_LD_LINKER_OPTS_STAGE0],[CONF_CPP_OPTS_STAGE0])
 FPTOOLS_SET_C_LD_FLAGS([target],[CONF_CC_OPTS_STAGE1],[CONF_GCC_LINKER_OPTS_STAGE1],[CONF_LD_LINKER_OPTS_STAGE1],[CONF_CPP_OPTS_STAGE1])
@@ -444,7 +461,10 @@ AC_SUBST(CONF_CPP_OPTS_STAGE0)
 AC_SUBST(CONF_CPP_OPTS_STAGE1)
 AC_SUBST(CONF_CPP_OPTS_STAGE2)
 
-FP_SETTINGS
+dnl ** Set up the variables for the platform in the settings file.
+dnl May need to use gcc to find platform details.
+dnl --------------------------------------------------------------
+FPTOOLS_SET_HASKELL_PLATFORM_VARS
 
 dnl ** figure out how to do context diffs
 FP_PROG_CONTEXT_DIFF
@@ -465,6 +485,7 @@ FP_PROG_AR_NEEDS_RANLIB
 dnl ** Check to see whether ln -s works
 AC_PROG_LN_S
 
+FP_SETTINGS
 
 dnl ** Find the path to sed
 AC_PATH_PROGS(SedCmd,gsed sed,sed)
@@ -564,6 +585,10 @@ fi
 AC_CHECK_SIZEOF(unsigned short,     2)
 AC_CHECK_SIZEOF(void *,             4)
 
+dnl for use in settings.in
+WordSize=$ac_cv_sizeof_void_p
+AC_SUBST(WordSize)
+
 dnl ** what are alignment constraints on various types
 FP_CHECK_ALIGNMENT(char)
 FP_CHECK_ALIGNMENT(double)
@@ -655,8 +680,8 @@ then
   AC_DEFINE([HAVE_LIBM], [1], [Define to 1 if you need to link with libm])
 fi
 
-dnl ** check whether this machine has BFD and liberty installed (used for debugging)
-dnl    the order of these tests matters: bfd needs liberty
+dnl ** check whether this machine has BFD and libiberty installed (used for debugging)
+dnl    the order of these tests matters: bfd needs libiberty
 AC_CHECK_LIB(iberty, xmalloc)
 AC_CHECK_LIB(bfd,    bfd_uncompress_section_contents)
 
@@ -680,7 +705,7 @@ dnl --------------------------------------------------
 dnl ** can we get alloca?
 AC_FUNC_ALLOCA
 
-dnl ** Working vfork?
+dnl ** working vfork?
 AC_FUNC_FORK
 
 dnl ** determine whether or not const works
@@ -697,37 +722,7 @@ dnl ** check for ld, whether it has an -x option, and if it is GNU ld
 FP_PROG_LD_X
 FP_PROG_LD_IS_GNU
 FP_PROG_LD_BUILD_ID
-
-dnl ** check for Apple-style dead-stripping support
-dnl    (.subsections-via-symbols assembler directive)
-
-
-AC_MSG_CHECKING(for .subsections_via_symbols)
-AC_COMPILE_IFELSE(
-    [AC_LANG_PROGRAM([], [__asm__ (".subsections_via_symbols");])],
-    [AC_MSG_RESULT(yes)
-     AC_DEFINE([HAVE_SUBSECTIONS_VIA_SYMBOLS],[1],
-               [Define to 1 if Apple-style dead-stripping is supported.])
-    ],
-    [AC_MSG_RESULT(no)])
-
-dnl *** check for GNU non-executable stack note support (ELF only)
-dnl     (.section .note.GNU-stack,"",@progbits)
-
-dnl This test doesn't work with "gcc -g" in gcc 4.4 (GHC trac #3889:
-dnl     Error: can't resolve `.note.GNU-stack' {.note.GNU-stack section} - `.Ltext0' {.text section}
-dnl so we empty CFLAGS while running this test
-CFLAGS2="$CFLAGS"
-CFLAGS=
-AC_MSG_CHECKING(for GNU non-executable stack support)
-AC_COMPILE_IFELSE(
-    [AC_LANG_PROGRAM([__asm__ (".section .note.GNU-stack,\"\",@progbits");], [0])],
-    [AC_MSG_RESULT(yes)
-     AC_DEFINE([HAVE_GNU_NONEXEC_STACK],[1],
-               [Define to 1 if GNU non-executable stack notes are supported.])
-    ],
-    [AC_MSG_RESULT(no)])
-CFLAGS="$CFLAGS2"
+FP_PROG_LD_NO_COMPACT_UNWIND
 
 FP_VISIBILITY_HIDDEN
 
@@ -766,7 +761,7 @@ if test -n "$GTK_CONFIG"; then
 fi
 AC_SUBST([GTK_CONFIG])
 
-#Checking for PAPI
+# checking for PAPI
 AC_CHECK_LIB(papi, PAPI_library_init, HavePapiLib=YES, HavePapiLib=NO)
 AC_CHECK_HEADER([papi.h], [HavePapiHeader=YES], [HavePapiHeader=NO])
 AC_SUBST(HavePapiLib)
@@ -802,7 +797,7 @@ AC_SUBST(BUILD_DOCBOOK_PS)
 AC_SUBST(BUILD_DOCBOOK_PDF)
 
 LIBRARY_VERSION(base)
-LIBRARY_VERSION(Cabal, Cabal/cabal)
+LIBRARY_VERSION(Cabal, Cabal/Cabal)
 LIBRARY_VERSION(ghc-prim)
 LIBRARY_ghc_VERSION="$ProjectVersion"
 AC_SUBST(LIBRARY_ghc_VERSION)
@@ -815,7 +810,7 @@ AC_CONFIG_FILES([mk/config.mk mk/install.mk mk/project.mk compiler/ghc.cabal ghc
 AC_CONFIG_COMMANDS([mk/stamp-h],[echo timestamp > mk/stamp-h])
 AC_OUTPUT
 
-# We get caught by
+# We got caught by
 #     http://savannah.gnu.org/bugs/index.php?1516
 #     $(eval ...) inside conditionals causes errors
 # with make 3.80, so warn the user if it looks like they're about to

@@ -6,6 +6,13 @@
 --
 -----------------------------------------------------------------------------
 
+{-# OPTIONS -fno-warn-tabs #-}
+-- The above warning supression flag is a temporary kludge.
+-- While working on this module you are encouraged to remove it and
+-- detab the module (please do the detabbing in a separate patch). See
+--     http://hackage.haskell.org/trac/ghc/wiki/Commentary/CodingStyle#TabsvsSpaces
+-- for details
+
 module StgCmmPrim (
    cgOpApp
  ) where
@@ -35,6 +42,7 @@ import Constants
 import Module
 import FastString
 import Outputable
+import StaticFlags
 
 ------------------------------------------------------------------------
 --	Primitive operations and foreign calls
@@ -215,11 +223,21 @@ emitPrimOp [res] SparkOp [arg]
         -- refer to arg twice (once to pass to newSpark(), and once to
         -- assign to res), so put it in a temporary.
         tmp <- assignTemp arg
+        tmp2 <- newTemp bWord
         emitCCall
-            []
+            [(tmp2,NoHint)]
             (CmmLit (CmmLabel (mkCmmCodeLabel rtsPackageId (fsLit "newSpark"))))
             [(CmmReg (CmmGlobal BaseReg), AddrHint), ((CmmReg (CmmLocal tmp)), AddrHint)]
         emit (mkAssign (CmmLocal res) (CmmReg (CmmLocal tmp)))
+
+emitPrimOp [res] GetCCSOfOp [arg]
+  = emit (mkAssign (CmmLocal res) val)
+  where
+    val | opt_SccProfilingOn = costCentreFrom (cmmUntag arg)
+        | otherwise          = CmmLit zeroCLit
+
+emitPrimOp [res] GetCurrentCCSOp [_dummy_arg]
+   = emit (mkAssign (CmmLocal res) curCCS)
 
 emitPrimOp [res] ReadMutVarOp [mutv]
    = emit (mkAssign (CmmLocal res) (cmmLoadIndexW mutv fixedHdrSize gcWord))
@@ -289,8 +307,12 @@ emitPrimOp [res] DataToTagOp [arg]
 --	}
 emitPrimOp [res] UnsafeFreezeArrayOp [arg]
    = emit $ catAGraphs
-	 [ setInfo arg (CmmLit (CmmLabel mkMAP_FROZEN_infoLabel)),
-	   mkAssign (CmmLocal res) arg ]
+   [ setInfo arg (CmmLit (CmmLabel mkMAP_FROZEN_infoLabel)),
+     mkAssign (CmmLocal res) arg ]
+emitPrimOp [res] UnsafeFreezeArrayArrayOp [arg]
+   = emit $ catAGraphs
+   [ setInfo arg (CmmLit (CmmLabel mkMAP_FROZEN_infoLabel)),
+     mkAssign (CmmLocal res) arg ]
 
 --  #define unsafeFreezzeByteArrayzh(r,a)	r=(a)
 emitPrimOp [res] UnsafeFreezeByteArrayOp [arg]
@@ -311,15 +333,35 @@ emitPrimOp [res] FreezeArrayOp [src,src_off,n] =
 emitPrimOp [res] ThawArrayOp [src,src_off,n] =
     emitCloneArray mkMAP_DIRTY_infoLabel res src src_off n
 
+emitPrimOp [] CopyArrayArrayOp [src,src_off,dst,dst_off,n] =
+    doCopyArrayOp src src_off dst dst_off n
+emitPrimOp [] CopyMutableArrayArrayOp [src,src_off,dst,dst_off,n] =
+    doCopyMutableArrayOp src src_off dst dst_off n
+
 -- Reading/writing pointer arrays
 
-emitPrimOp [r] ReadArrayOp  [obj,ix]    = doReadPtrArrayOp r obj ix
-emitPrimOp [r] IndexArrayOp [obj,ix]    = doReadPtrArrayOp r obj ix
+emitPrimOp [res] ReadArrayOp  [obj,ix]    = doReadPtrArrayOp res obj ix
+emitPrimOp [res] IndexArrayOp [obj,ix]    = doReadPtrArrayOp res obj ix
 emitPrimOp []  WriteArrayOp [obj,ix,v]  = doWritePtrArrayOp obj ix v
+
+emitPrimOp [res] IndexArrayArrayOp_ByteArray         [obj,ix]   = doReadPtrArrayOp res obj ix
+emitPrimOp [res] IndexArrayArrayOp_ArrayArray        [obj,ix]   = doReadPtrArrayOp res obj ix
+emitPrimOp [res] ReadArrayArrayOp_ByteArray          [obj,ix]   = doReadPtrArrayOp res obj ix
+emitPrimOp [res] ReadArrayArrayOp_MutableByteArray   [obj,ix]   = doReadPtrArrayOp res obj ix
+emitPrimOp [res] ReadArrayArrayOp_ArrayArray         [obj,ix]   = doReadPtrArrayOp res obj ix
+emitPrimOp [res] ReadArrayArrayOp_MutableArrayArray  [obj,ix]   = doReadPtrArrayOp res obj ix
+emitPrimOp []  WriteArrayArrayOp_ByteArray         [obj,ix,v] = doWritePtrArrayOp obj ix v
+emitPrimOp []  WriteArrayArrayOp_MutableByteArray  [obj,ix,v] = doWritePtrArrayOp obj ix v
+emitPrimOp []  WriteArrayArrayOp_ArrayArray        [obj,ix,v] = doWritePtrArrayOp obj ix v
+emitPrimOp []  WriteArrayArrayOp_MutableArrayArray [obj,ix,v] = doWritePtrArrayOp obj ix v
 
 emitPrimOp [res] SizeofArrayOp [arg]
    = emit $	mkAssign (CmmLocal res) (cmmLoadIndexW arg (fixedHdrSize + oFFSET_StgMutArrPtrs_ptrs) bWord)
 emitPrimOp [res] SizeofMutableArrayOp [arg]
+   = emitPrimOp [res] SizeofArrayOp [arg]
+emitPrimOp [res] SizeofArrayArrayOp [arg]
+   = emitPrimOp [res] SizeofArrayOp [arg]
+emitPrimOp [res] SizeofMutableArrayArrayOp [arg]
    = emitPrimOp [res] SizeofArrayOp [arg]
 
 -- IndexXXXoffAddr
@@ -608,6 +650,7 @@ translateOp SameMutVarOp           = Just mo_wordEq
 translateOp SameMVarOp             = Just mo_wordEq
 translateOp SameMutableArrayOp     = Just mo_wordEq
 translateOp SameMutableByteArrayOp = Just mo_wordEq
+translateOp SameMutableArrayArrayOp= Just mo_wordEq
 translateOp SameTVarOp             = Just mo_wordEq
 translateOp EqStablePtrOp          = Just mo_wordEq
 
@@ -870,7 +913,7 @@ emitCloneArray info_p res_r src0 src_off0 n0 = do
         (CmmLit $ mkIntCLit 0)
 
     let arr = CmmReg (CmmLocal arr_r)
-    emitSetDynHdr arr (CmmLit (CmmLabel info_p)) curCCSAddr
+    emitSetDynHdr arr (CmmLit (CmmLabel info_p)) curCCS
     emit $ mkStore (cmmOffsetB arr (fixedHdrSize * wORD_SIZE +
                                     oFFSET_StgMutArrPtrs_ptrs)) n
     emit $ mkStore (cmmOffsetB arr (fixedHdrSize * wORD_SIZE +

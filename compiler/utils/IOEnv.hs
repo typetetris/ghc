@@ -3,6 +3,10 @@
 --
 -- The IO Monad with an environment
 --
+-- The environment is passed around as a Reader monad but
+-- as its in the IO monad, mutable references can be used
+-- for updating state.
+--
 {-# LANGUAGE UndecidableInstances #-}
 
 module IOEnv (
@@ -26,6 +30,7 @@ module IOEnv (
         atomicUpdMutVar, atomicUpdMutVar'
   ) where
 
+import DynFlags
 import Exception
 import Panic
 
@@ -83,6 +88,10 @@ instance Show IOEnvFailure where
     show IOEnvFailure = "IOEnv failure"
 
 instance Exception IOEnvFailure
+
+instance ContainsDynFlags env => HasDynFlags (IOEnv env) where
+    getDynFlags = do env <- getEnv
+                     return $ extractDynFlags env
 
 ----------------------------------------------------------------------
 -- Fundmantal combinators specific to the monad

@@ -6,6 +6,13 @@
 --
 -----------------------------------------------------------------------------
 
+{-# OPTIONS -fno-warn-tabs #-}
+-- The above warning supression flag is a temporary kludge.
+-- While working on this module you are encouraged to remove it and
+-- detab the module (please do the detabbing in a separate patch). See
+--     http://hackage.haskell.org/trac/ghc/wiki/Commentary/CodingStyle#TabsvsSpaces
+-- for details
+
 module StgCmmUtils (
 	cgLit, mkSimpleLit,
 	emitDataLits, mkDataLits,
@@ -246,7 +253,7 @@ callerSaveVolatileRegs = (caller_save, caller_load)
     caller_save = catAGraphs (map callerSaveGlobalReg    regs_to_save)
     caller_load = catAGraphs (map callerRestoreGlobalReg regs_to_save)
 
-    system_regs = [ Sp,SpLim,Hp,HpLim,CurrentTSO,CurrentNursery
+    system_regs = [ Sp,SpLim,Hp,HpLim,CCCS,CurrentTSO,CurrentNursery
 		    {- ,SparkHd,SparkTl,SparkBase,SparkLim -}
 		  , BaseReg ]
 
@@ -320,6 +327,12 @@ callerSaves (VanillaReg 7 _)	= True
 #ifdef CALLER_SAVES_R8
 callerSaves (VanillaReg 8 _)	= True
 #endif
+#ifdef CALLER_SAVES_R9
+callerSaves (VanillaReg 9 _)	= True
+#endif
+#ifdef CALLER_SAVES_R10
+callerSaves (VanillaReg 10 _)	= True
+#endif
 #ifdef CALLER_SAVES_F1
 callerSaves (FloatReg 1)	= True
 #endif
@@ -353,6 +366,9 @@ callerSaves Hp			= True
 #ifdef CALLER_SAVES_HpLim
 callerSaves HpLim		= True
 #endif
+#ifdef CALLER_SAVES_CCCS
+callerSaves CCCS                = True
+#endif
 #ifdef CALLER_SAVES_CurrentTSO
 callerSaves CurrentTSO		= True
 #endif
@@ -372,7 +388,8 @@ baseRegOffset SpLim		  = oFFSET_StgRegTable_rSpLim
 baseRegOffset (LongReg 1)         = oFFSET_StgRegTable_rL1
 baseRegOffset Hp		  = oFFSET_StgRegTable_rHp
 baseRegOffset HpLim		  = oFFSET_StgRegTable_rHpLim
-baseRegOffset CurrentTSO	  = oFFSET_StgRegTable_rCurrentTSO
+baseRegOffset CCCS                = oFFSET_StgRegTable_rCCCS
+baseRegOffset CurrentTSO          = oFFSET_StgRegTable_rCurrentTSO
 baseRegOffset CurrentNursery	  = oFFSET_StgRegTable_rCurrentNursery
 baseRegOffset HpAlloc		  = oFFSET_StgRegTable_rHpAlloc
 baseRegOffset GCEnter1		  = oFFSET_stgGCEnter1

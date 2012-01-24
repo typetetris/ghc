@@ -21,7 +21,7 @@
 
 module CmmParse ( parseCmmFile ) where
 
-import CgMonad		hiding (getDynFlags)
+import CgMonad
 import CgExtCode
 import CgHeapery
 import CgUtils
@@ -411,10 +411,10 @@ stmt	:: { ExtCode }
 		{ do as <- sequence $5; doSwitch $2 $3 as $6 }
 	| 'goto' NAME ';'
 		{ do l <- lookupLabel $2; stmtEC (CmmBranch l) }
-	| 'jump' expr maybe_actuals ';'
-		{ do e1 <- $2; e2 <- sequence $3; stmtEC (CmmJump e1 e2) }
-        | 'return' maybe_actuals ';'
-		{ do e <- sequence $2; stmtEC (CmmReturn e) }
+	| 'jump' expr vols ';'
+		{ do e <- $2; stmtEC (CmmJump e $3) }
+        | 'return' ';'
+		{ stmtEC CmmReturn }
 	| 'if' bool_expr 'goto' NAME
 		{ do l <- lookupLabel $4; cmmRawIf $2 l }
 	| 'if' bool_expr '{' body '}' else 	
@@ -775,8 +775,9 @@ isPtrGlobalReg Sp		     = True
 isPtrGlobalReg SpLim		     = True
 isPtrGlobalReg Hp		     = True
 isPtrGlobalReg HpLim		     = True
-isPtrGlobalReg CurrentTSO	     = True
-isPtrGlobalReg CurrentNursery	     = True
+isPtrGlobalReg CCCS                  = True
+isPtrGlobalReg CurrentTSO            = True
+isPtrGlobalReg CurrentNursery        = True
 isPtrGlobalReg (VanillaReg _ VGcPtr) = True
 isPtrGlobalReg _		     = False
 
@@ -798,7 +799,6 @@ stmtMacros :: UniqFM ([CmmExpr] -> Code)
 stmtMacros = listToUFM [
   ( fsLit "CCS_ALLOC",		   \[words,ccs]  -> profAlloc words ccs ),
   ( fsLit "CLOSE_NURSERY",	   \[]  -> emitCloseNursery ),
-  ( fsLit "ENTER_CCS_PAP_CL",     \[e] -> enterCostCentrePAP e ),
   ( fsLit "ENTER_CCS_THUNK",      \[e] -> enterCostCentreThunk e ),
   ( fsLit "HP_CHK_GEN",           \[words,liveness,reentry] -> 
                                       hpChkGen words liveness reentry ),
@@ -868,10 +868,9 @@ foreignCall conv_string results_code expr_code args_code vols safety ret
 	  results <- sequence results_code
 	  expr <- expr_code
 	  args <- sequence args_code
-	  --code (stmtC (CmmCall (CmmCallee expr convention) results args safety))
           case convention of
             -- Temporary hack so at least some functions are CmmSafe
-            CmmCallConv -> code (stmtC (CmmCall (CmmCallee expr convention) results args safety ret))
+            CmmCallConv -> code (stmtC (CmmCall (CmmCallee expr convention) results args ret))
             _ ->
               let expr' = adjCallTarget convention expr args in
               case safety of
@@ -941,13 +940,12 @@ doStore rep addr_code val_code
 emitRetUT :: [(CgRep,CmmExpr)] -> Code
 emitRetUT args = do
   tickyUnboxedTupleReturn (length args)  -- TICK
-  (sp, stmts) <- pushUnboxedTuple 0 args
+  (sp, stmts, live) <- pushUnboxedTuple 0 args
   emitSimultaneously stmts -- NB. the args might overlap with the stack slots
                            -- or regs that we assign to, so better use
                            -- simultaneous assignments here (#3546)
   when (sp /= 0) $ stmtC (CmmAssign spReg (cmmRegOffW spReg (-sp)))
-  stmtC (CmmJump (entryCode (CmmLoad (cmmRegOffW spReg sp) bWord)) [])
-  -- TODO (when using CPS): emitStmt (CmmReturn (map snd args))
+  stmtC $ CmmJump (entryCode (CmmLoad (cmmRegOffW spReg sp) bWord)) (Just live)
 
 -- -----------------------------------------------------------------------------
 -- If-then-else and boolean expressions

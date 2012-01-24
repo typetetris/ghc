@@ -31,12 +31,14 @@
       the PIC base register when needed.
     - MachCodeGen calls cmmMakeDynamicReference whenever it uses a CLabel
       that wasn't in the original Cmm code (e.g. floating point literals).
-  + The Mangler
-    - The mangler converts absolure refs to relative refs in info tables
-    - Symbol pointers, stub code and PIC calculations that are generated
-      by GCC are left intact by the mangler (so far only on ppc-darwin
-      and ppc-linux).
 -}
+
+{-# OPTIONS -fno-warn-tabs #-}
+-- The above warning supression flag is a temporary kludge.
+-- While working on this module you are encouraged to remove it and
+-- detab the module (please do the detabbing in a separate patch). See
+--     http://hackage.haskell.org/trac/ghc/wiki/Commentary/CodingStyle#TabsvsSpaces
+-- for details
 
 module PIC (
         cmmMakeDynamicReference,
@@ -510,7 +512,7 @@ pprGotDeclaration _ _
 -- the splitter in driver/split/ghc-split.lprl recognizes the new output
 
 pprImportedSymbol :: Platform -> CLabel -> Doc
-pprImportedSymbol platform@(Platform ArchPPC OSDarwin) importedLbl
+pprImportedSymbol platform@(Platform { platformArch = ArchPPC, platformOS = OSDarwin }) importedLbl
 	| Just (CodeStub, lbl) <- dynamicLinkerLabelInfo importedLbl
 	= case opt_PIC of
            False ->
@@ -564,7 +566,7 @@ pprImportedSymbol platform@(Platform ArchPPC OSDarwin) importedLbl
 	= empty
 
 		
-pprImportedSymbol platform@(Platform ArchX86 OSDarwin) importedLbl
+pprImportedSymbol platform@(Platform { platformArch = ArchX86, platformOS = OSDarwin }) importedLbl
 	| Just (CodeStub, lbl) <- dynamicLinkerLabelInfo importedLbl
 	= case opt_PIC of
            False ->
@@ -617,7 +619,7 @@ pprImportedSymbol platform@(Platform ArchX86 OSDarwin) importedLbl
 	= empty
 
 
-pprImportedSymbol (Platform _ OSDarwin) _
+pprImportedSymbol (Platform { platformOS = OSDarwin }) _
 	= empty
 	
 
@@ -650,12 +652,12 @@ pprImportedSymbol (Platform _ OSDarwin) _
 -- the NCG will keep track of all DynamicLinkerLabels it uses
 -- and output each of them using pprImportedSymbol.
 
-pprImportedSymbol (Platform ArchPPC_64 os) _
-	| osElfTarget os
+pprImportedSymbol platform@(Platform { platformArch = ArchPPC_64 }) _
+	| osElfTarget (platformOS platform)
 	= empty
 
-pprImportedSymbol platform@(Platform _ os) importedLbl
-	| osElfTarget os
+pprImportedSymbol platform importedLbl
+	| osElfTarget (platformOS platform)
 	= case dynamicLinkerLabelInfo importedLbl of
 	    Just (SymbolPtr, lbl)
 	      -> let symbolSize = case wordWidth of

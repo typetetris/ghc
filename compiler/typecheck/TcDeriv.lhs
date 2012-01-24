@@ -6,6 +6,13 @@
 Handles @deriving@ clauses on @data@ declarations.
 
 \begin{code}
+{-# OPTIONS -fno-warn-tabs #-}
+-- The above warning supression flag is a temporary kludge.
+-- While working on this module you are encouraged to remove it and
+-- detab the module (please do the detabbing in a separate patch). See
+--     http://hackage.haskell.org/trac/ghc/wiki/Commentary/CodingStyle#TabsvsSpaces
+-- for details
+
 module TcDeriv ( tcDeriving ) where
 
 #include "HsVersions.h"
@@ -25,15 +32,15 @@ import FamInstEnv
 import TcHsType
 import TcMType
 import TcSimplify
+import TcEvidence
 
 import RnBinds
-import RnEnv
+import RnEnv  
 import RnSource   ( addTcgDUs )
 import HscTypes
 
 import Class
 import Type
-import Coercion
 import ErrUtils
 import MkId
 import DataCon
@@ -324,43 +331,38 @@ tcDeriving tycl_decls inst_decls deriv_decls
         ; (inst_info, rn_binds, rn_dus) <-
             renameDeriv is_boot (inst_infos ++ (bagToList extraInstances)) binds
 
-	; dflags <- getDOpts
+	; dflags <- getDynFlags
 	; liftIO (dumpIfSet_dyn dflags Opt_D_dump_deriv "Derived instances"
-	         (ddump_deriving inst_info rn_binds newTyCons famInsts extraInstances))
-{-
-        ; when (not (null inst_info)) $
-          dumpDerivingInfo (ddump_deriving inst_info rn_binds)
--}
+	         (ddump_deriving inst_info rn_binds newTyCons famInsts))
 
   ; let all_tycons = map ATyCon (bagToList newTyCons)
   ; gbl_env <- tcExtendGlobalEnv all_tycons $
-               tcExtendGlobalEnv (concatMap implicitTyThings all_tycons) $
-               tcExtendLocalFamInstEnv (map mkLocalFamInst (bagToList famInsts)) $
+               tcExtendGlobalEnvImplicit (concatMap implicitTyThings all_tycons) $
+               tcExtendLocalFamInstEnv (bagToList famInsts) $
                tcExtendLocalInstEnv (map iSpec (bagToList inst_info)) getGblEnv
 
   ; return (addTcgDUs gbl_env rn_dus, inst_info, rn_binds) }
   where
     ddump_deriving :: Bag (InstInfo Name) -> HsValBinds Name 
-                   -> Bag TyCon  -- ^ Empty data constructors
-                   -> Bag TyCon  -- ^ Rep type family instances
-                   -> Bag (InstInfo RdrName)
-                      -- ^ Instances for the repMetaTys
+                   -> Bag TyCon    -- ^ Empty data constructors
+                   -> Bag FamInst  -- ^ Rep type family instances
                    -> SDoc
-    ddump_deriving inst_infos extra_binds repMetaTys repTyCons metaInsts
+    ddump_deriving inst_infos extra_binds repMetaTys repFamInsts
       =    hang (ptext (sLit "Derived instances:"))
               2 (vcat (map (\i -> pprInstInfoDetails i $$ text "") (bagToList inst_infos))
                  $$ ppr extra_binds)
         $$ hangP "Generic representation:" (
               hangP "Generated datatypes for meta-information:"
                (vcat (map ppr (bagToList repMetaTys)))
-           -- The Outputable instance for TyCon unfortunately only prints the name...
            $$ hangP "Representation types:"
-                (vcat (map ppr (bagToList repTyCons)))
-           $$ hangP "Meta-information instances:"
-                (vcat (map pprInstInfoDetails (bagToList metaInsts))))
-    
+                (vcat (map pprRepTy (bagToList repFamInsts))))
+
     hangP s x = text "" $$ hang (ptext (sLit s)) 2 x
 
+-- Prints the representable type family instance
+pprRepTy :: FamInst -> SDoc
+pprRepTy fi
+  = pprFamInstHdr fi <+> ptext (sLit "=") <+> ppr (coAxiomRHS (famInstAxiom fi))
 
 renameDeriv :: Bool
 	    -> [InstInfo RdrName]
@@ -382,8 +384,9 @@ renameDeriv is_boot inst_infos bagBinds
 	; (aux_binds, aux_sigs) <- mapAndUnzipBagM return bagBinds
 	; let aux_val_binds = ValBindsIn aux_binds (bagToList aux_sigs)
 	; rn_aux_lhs <- rnTopBindsLHS emptyFsEnv aux_val_binds
-	; bindLocalNames (collectHsValBinders rn_aux_lhs) $
-    do	{ (rn_aux, dus_aux) <- rnTopBindsRHS rn_aux_lhs
+        ; let bndrs = collectHsValBinders rn_aux_lhs
+	; bindLocalNames bndrs $ 
+    do	{ (rn_aux, dus_aux) <- rnValBindsRHS (LocalBindCtxt (mkNameSet bndrs)) rn_aux_lhs
 	; (rn_inst_infos, fvs_insts) <- mapAndUnzipM rn_inst_info inst_infos
 	; return (listToBag rn_inst_infos, rn_aux,
                   dus_aux `plusDU` usesOnly (plusFVs fvs_insts)) } }
@@ -474,13 +477,12 @@ deriveStandalone (L loc (DerivDecl deriv_ty))
   = setSrcSpan loc                   $
     addErrCtxt (standaloneCtxt deriv_ty)  $
     do { traceTc "Standalone deriving decl for" (ppr deriv_ty)
-       ; (tvs, theta, cls, inst_tys) <- tcHsInstHead deriv_ty
+       ; (tvs, theta, cls, inst_tys) <- tcHsInstHead TcType.InstDeclCtxt deriv_ty
        ; traceTc "Standalone deriving;" $ vcat
               [ text "tvs:" <+> ppr tvs
               , text "theta:" <+> ppr theta
               , text "cls:" <+> ppr cls
               , text "tys:" <+> ppr inst_tys ]
-       ; checkValidInstance deriv_ty tvs theta cls inst_tys
 		-- C.f. TcInstDcls.tcLocalInstDecl1
 
        ; let cls_tys = take (length inst_tys - 1) inst_tys
@@ -494,6 +496,7 @@ deriveStandalone (L loc (DerivDecl deriv_ty))
 
 ------------------------------------------------------------------
 deriveTyData :: (LHsType Name, LTyClDecl Name) -> TcM EarlyDerivSpec
+-- The deriving clause of a data or newtype declaration
 deriveTyData (L loc deriv_pred, L _ decl@(TyData { tcdLName = L _ tycon_name,
 					           tcdTyVars = tv_names,
 				    	           tcdTyPats = ty_pats }))
@@ -541,7 +544,7 @@ deriveTyData (L loc deriv_pred, L _ decl@(TyData { tcdLName = L _ tycon_name,
 	; checkTc (not (isFamilyTyCon tc) || n_args_to_drop == 0)
 		  (typeFamilyPapErr tc cls cls_tys inst_ty)
 
-	; mkEqnHelp DerivOrigin (varSetElems univ_tvs) cls cls_tys inst_ty Nothing } }
+	; mkEqnHelp DerivOrigin (varSetElemsKvsFirst univ_tvs) cls cls_tys inst_ty Nothing } }
   where
 	-- Tiresomely we must figure out the "lhs", which is awkward for type families
 	-- E.g.   data T a b = .. deriving( Eq )
@@ -553,6 +556,7 @@ deriveTyData (L loc deriv_pred, L _ decl@(TyData { tcdLName = L _ tycon_name,
     get_lhs Nothing     = do { tc <- tcLookupTyCon tycon_name
 			     ; let tvs = tyConTyVars tc
 			     ; return (tvs, tc, mkTyVarTys tvs) }
+    -- JPM: to fix
     get_lhs (Just pats) = do { let hs_app = nlHsTyConApp tycon_name pats
 			     ; (tvs, tc_app) <- tcHsQuantifiedType tv_names hs_app
 			     ; let (tc, tc_args) = tcSplitTyConApp tc_app
@@ -613,7 +617,7 @@ mkEqnHelp orig tvs cls cls_tys tc_app mtheta
 
      mk_alg_eqn tycon tc_args
       | className cls `elem` typeableClassNames
-      = do { dflags <- getDOpts
+      = do { dflags <- getDynFlags
            ; case checkTypeableConditions (dflags, tycon) of
                Just err -> bale_out err
                Nothing  -> mk_typeable_eqn orig tvs cls tycon tc_args mtheta }
@@ -637,7 +641,7 @@ mkEqnHelp orig tvs cls cls_tys tc_app mtheta
       	   ; unless (isNothing mtheta || not hidden_data_cons)
       	   	    (bale_out (derivingHiddenErr tycon))
 
-      	   ; dflags <- getDOpts
+      	   ; dflags <- getDynFlags
       	   ; if isDataTyCon rep_tc then
       	   	mkDataTypeEqn orig dflags tvs cls cls_tys
       	   		      tycon tc_args rep_tc rep_tc_args mtheta
@@ -1023,7 +1027,7 @@ cond_functorOK allowFunctions (_, rep_tc)
     existential = ptext (sLit "must not have existential arguments")
     covariant 	= ptext (sLit "must not use the type variable in a function argument")
     functions 	= ptext (sLit "must not contain function types")
-    wrong_arg 	= ptext (sLit "must not use the type variable in an argument other than the last")
+    wrong_arg 	= ptext (sLit "must use the type variable only as the last argument of a data type")
 
 checkFlag :: ExtensionFlag -> Condition
 checkFlag flag (dflags, _)
@@ -1111,7 +1115,7 @@ mkNewTypeEqn orig dflags tvs
 	; dfun_name <- new_dfun_name cls tycon
   	; loc <- getSrcSpanM
 	; let spec = DS { ds_loc = loc, ds_orig = orig
-			, ds_name = dfun_name, ds_tvs = varSetElems dfun_tvs
+			, ds_name = dfun_name, ds_tvs = varSetElemsKvsFirst dfun_tvs
 			, ds_cls = cls, ds_tys = inst_tys
 			, ds_tc = rep_tycon, ds_tc_args = rep_tc_args
 			, ds_theta =  mtheta `orElse` all_preds
@@ -1348,7 +1352,7 @@ inferInstanceContexts oflag infer_specs
         the_pred = mkClassPred clas inst_tys
 
 ------------------------------------------------------------------
-mkInstance :: OverlapFlag -> ThetaType -> DerivSpec -> Instance
+mkInstance :: OverlapFlag -> ThetaType -> DerivSpec -> ClsInst
 mkInstance overlap_flag theta
 	    (DS { ds_name = dfun_name
 		, ds_tvs = tyvars, ds_cls = clas, ds_tys = tys })
@@ -1357,7 +1361,7 @@ mkInstance overlap_flag theta
     dfun = mkDictFunId dfun_name tyvars theta clas tys
 
 
-extendLocalInstEnv :: [Instance] -> TcM a -> TcM a
+extendLocalInstEnv :: [ClsInst] -> TcM a -> TcM a
 -- Add new locally-defined instances; don't bother to check
 -- for functional dependency errors -- that'll happen in TcInstDcls
 extendLocalInstEnv dfuns thing_inside
@@ -1442,7 +1446,7 @@ genInst :: Bool             -- True <=> standalone deriving
         -> OverlapFlag
         -> DerivSpec -> TcM (InstInfo RdrName, BagDerivStuff)
 genInst standalone_deriv oflag
-        spec@(DS { ds_tc = rep_tycon, ds_tc_args = rep_tc_args
+        spec@(DS { ds_tvs = tvs, ds_tc = rep_tycon, ds_tc_args = rep_tc_args
                  , ds_theta = theta, ds_newtype = is_newtype
                  , ds_name = name, ds_cls = clas })
   | is_newtype
@@ -1461,12 +1465,12 @@ genInst standalone_deriv oflag
 
     inst_spec = mkInstance oflag theta spec
     co1 = case tyConFamilyCoercion_maybe rep_tycon of
-              Just co_con -> mkAxInstCo co_con rep_tc_args
+              Just co_con -> mkTcAxInstCo co_con rep_tc_args
               Nothing     -> id_co
               -- Not a family => rep_tycon = main tycon
-    co2 = mkAxInstCo (newTyConCo rep_tycon) rep_tc_args
-    co  = co1 `mkTransCo` co2
-    id_co = mkReflCo (mkTyConApp rep_tycon rep_tc_args)
+    co2 = mkTcAxInstCo (newTyConCo rep_tycon) rep_tc_args
+    co  = mkTcForAllCos tvs (co1 `mkTcTransCo` co2)
+    id_co = mkTcReflCo (mkTyConApp rep_tycon rep_tc_args)
 
 -- Example: newtype instance N [a] = N1 (Tree a)
 --          deriving instance Eq b => Eq (N [(b,b)])
@@ -1512,25 +1516,25 @@ genDerivStuff loc fix_env clas name tycon
 %************************************************************************
 
 \begin{code}
-derivingKindErr :: TyCon -> Class -> [Type] -> Kind -> Message
+derivingKindErr :: TyCon -> Class -> [Type] -> Kind -> MsgDoc
 derivingKindErr tc cls cls_tys cls_kind
   = hang (ptext (sLit "Cannot derive well-kinded instance of form")
 		<+> quotes (pprClassPred cls cls_tys <+> parens (ppr tc <+> ptext (sLit "..."))))
        2 (ptext (sLit "Class") <+> quotes (ppr cls)
 	    <+> ptext (sLit "expects an argument of kind") <+> quotes (pprKind cls_kind))
 
-derivingEtaErr :: Class -> [Type] -> Type -> Message
+derivingEtaErr :: Class -> [Type] -> Type -> MsgDoc
 derivingEtaErr cls cls_tys inst_ty
   = sep [ptext (sLit "Cannot eta-reduce to an instance of form"),
 	 nest 2 (ptext (sLit "instance (...) =>")
 		<+> pprClassPred cls (cls_tys ++ [inst_ty]))]
 
-typeFamilyPapErr :: TyCon -> Class -> [Type] -> Type -> Message
+typeFamilyPapErr :: TyCon -> Class -> [Type] -> Type -> MsgDoc
 typeFamilyPapErr tc cls cls_tys inst_ty
   = hang (ptext (sLit "Derived instance") <+> quotes (pprClassPred cls (cls_tys ++ [inst_ty])))
        2 (ptext (sLit "requires illegal partial application of data type family") <+> ppr tc)
 
-derivingThingErr :: Bool -> Class -> [Type] -> Type -> Message -> Message
+derivingThingErr :: Bool -> Class -> [Type] -> Type -> MsgDoc -> MsgDoc
 derivingThingErr newtype_deriving clas tys ty why
   = sep [(hang (ptext (sLit "Can't make a derived instance of"))
 	     2 (quotes (ppr pred))
@@ -1550,7 +1554,7 @@ standaloneCtxt :: LHsType Name -> SDoc
 standaloneCtxt ty = hang (ptext (sLit "In the stand-alone deriving instance for"))
 		       2 (quotes (ppr ty))
 
-derivInstCtxt :: PredType -> Message
+derivInstCtxt :: PredType -> MsgDoc
 derivInstCtxt pred
   = ptext (sLit "When deriving the instance for") <+> parens (ppr pred)
 \end{code}

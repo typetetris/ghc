@@ -1,17 +1,24 @@
-%
+ | %
 % (c) The University of Glasgow 2006
 % (c) The GRASP/AQUA Project, Glasgow University, 1998
 %
 \section[TypeRep]{Type - friends' interface}
 
 \begin{code}
+{-# OPTIONS -fno-warn-tabs #-}
+-- The above warning supression flag is a temporary kludge.
+-- While working on this module you are encouraged to remove it and
+-- detab the module (please do the detabbing in a separate patch). See
+--     http://hackage.haskell.org/trac/ghc/wiki/Commentary/CodingStyle#TabsvsSpaces
+-- for details
+
 -- We expose the relevant stuff from this module via the Type module
 {-# OPTIONS_HADDOCK hide #-}
 {-# LANGUAGE DeriveDataTypeable, DeriveFunctor, DeriveFoldable, DeriveTraversable #-}
 module TypeRep (
 	TyThing(..),
 	Type(..),
-        Kind, SuperKind,
+        KindOrType, Kind, SuperKind,
         PredType, ThetaType,      -- Synonyms
 
         -- Functions over types
@@ -24,7 +31,7 @@ module TypeRep (
 	pprEqPred, pprTheta, pprForAll, pprThetaArrowTy, pprClassPred,
         pprKind, pprParendKind,
 	Prec(..), maybeParen, pprTcApp, pprTypeNameApp, 
-        pprPrefixApp, pprArrowChain,
+        pprPrefixApp, pprArrowChain, ppr_type,
 
         -- Free variables
         tyVarsOfType, tyVarsOfTypes,
@@ -57,48 +64,6 @@ import Pair
 import qualified Data.Data        as Data hiding ( TyCon )
 \end{code}
 
-	----------------------
-	A note about newtypes
-	----------------------
-
-Consider
-	newtype N = MkN Int
-
-Then we want N to be represented as an Int, and that's what we arrange.
-The front end of the compiler [TcType.lhs] treats N as opaque, 
-the back end treats it as transparent [Type.lhs].
-
-There's a bit of a problem with recursive newtypes
-	newtype P = MkP P
-	newtype Q = MkQ (Q->Q)
-
-Here the 'implicit expansion' we get from treating P and Q as transparent
-would give rise to infinite types, which in turn makes eqType diverge.
-Similarly splitForAllTys and splitFunTys can get into a loop.  
-
-Solution: 
-
-* Newtypes are always represented using TyConApp.
-
-* For non-recursive newtypes, P, treat P just like a type synonym after 
-  type-checking is done; i.e. it's opaque during type checking (functions
-  from TcType) but transparent afterwards (functions from Type).  
-  "Treat P as a type synonym" means "all functions expand NewTcApps 
-  on the fly".
-
-  Applications of the data constructor P simply vanish:
-	P x = x
-  
-
-* For recursive newtypes Q, treat the Q and its representation as 
-  distinct right through the compiler.  Applications of the data consructor
-  use a coerce:
-	Q = \(x::Q->Q). coerce Q x
-  They are rare, so who cares if they are a tiny bit less efficient.
-
-The typechecker (TcTyDecls) identifies enough type construtors as 'recursive'
-to cut all loops.  The other members of the loop may be marked 'non-recursive'.
-
 
 %************************************************************************
 %*									*
@@ -110,9 +75,9 @@ to cut all loops.  The other members of the loop may be marked 'non-recursive'.
 \begin{code}
 -- | The key representation of types within the compiler
 data Type
-  = TyVarTy TyVar	-- ^ Vanilla type variable (*never* a coercion variable)
+  = TyVarTy Var	-- ^ Vanilla type or kind variable (*never* a coercion variable)
 
-  | AppTy
+  | AppTy         -- See Note [AppTy invariant]
 	Type
 	Type		-- ^ Type application to something other than a 'TyCon'. Parameters:
 	                --
@@ -121,9 +86,9 @@ data Type
 	                --
 	                --  2) Argument type
 
-  | TyConApp
+  | TyConApp      -- See Note [AppTy invariant]
 	TyCon
-	[Type]		-- ^ Application of a 'TyCon', including newtypes /and/ synonyms.
+	[KindOrType]	-- ^ Application of a 'TyCon', including newtypes /and/ synonyms.
 	                -- Invariant: saturated appliations of 'FunTyCon' must
 	                -- use 'FunTy' and saturated synonyms must use their own
                         -- constructors. However, /unsaturated/ 'FunTyCon's
@@ -144,10 +109,12 @@ data Type
 			-- See Note [Equality-constrained types]
 
   | ForAllTy
-	TyVar         -- Type variable
+	Var         -- Type or kind variable
 	Type	        -- ^ A polymorphic type
 
   deriving (Data.Data, Data.Typeable)
+
+type KindOrType = Type -- See Note [Arguments to type constructors]
 
 -- | The key type representing kinds in the compiler.
 -- Invariant: a kind is always in one of these forms:
@@ -164,6 +131,51 @@ type Kind = Type
 -- > TyConApp SuperKindTyCon ...
 type SuperKind = Type
 \end{code}
+
+Note [The kind invariant]
+~~~~~~~~~~~~~~~~~~~~~~~~~
+The kinds
+   #          UnliftedTypeKind
+   ArgKind    super-kind of *, #
+   (#)        UbxTupleKind
+   OpenKind   super-kind of ArgKind, ubxTupleKind
+
+can never appear under an arrow or type constructor in a kind; they
+can only be at the top level of a kind.  It follows that primitive TyCons,
+which have a naughty pseudo-kind
+   State# :: * -> #
+must always be saturated, so that we can never get a type whose kind
+has a UnliftedTypeKind or ArgTypeKind underneath an arrow.
+
+Nor can we abstract over a type variable with any of these kinds.
+
+    k :: = kk | # | ArgKind | (#) | OpenKind 
+    kk :: = * | kk -> kk | T kk1 ... kkn
+
+So a type variable can only be abstracted kk.
+
+Note [Arguments to type constructors]
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+Because of kind polymorphism, in addition to type application we now
+have kind instantiation. We reuse the same notations to do so.
+
+For example:
+
+  Just (* -> *) Maybe
+  Right * Nat Zero
+
+are represented by:
+
+  TyConApp (PromotedDataCon Just) [* -> *, Maybe]
+  TyConApp (PromotedDataCon Right) [*, Nat, (PromotedDataCon Zero)]
+
+Important note: Nat is used as a *kind* and not as a type. This can be
+confusing, since type-level Nat and kind-level Nat are identical. We
+use the kind of (PromotedDataCon Right) to know if its arguments are
+kinds or types.
+
+This kind instantiation only happens in TyConApp currently.
+
 
 Note [Equality-constrained types]
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -259,9 +271,12 @@ isLiftedTypeKind _                = False
 %*									*
 %************************************************************************
 
-\begin{code}
+\begin{code}  
 tyVarsOfType :: Type -> VarSet
 -- ^ NB: for type synonyms tyVarsOfType does /not/ expand the synonym
+-- tyVarsOfType returns only the free variables of a type
+-- For example, tyVarsOfType (a::k) returns {a}, not including the
+-- kind variable {k}
 tyVarsOfType (TyVarTy v)         = unitVarSet v
 tyVarsOfType (TyConApp _ tys)    = tyVarsOfTypes tys
 tyVarsOfType (FunTy arg res)     = tyVarsOfType arg `unionVarSet` tyVarsOfType res
@@ -282,13 +297,22 @@ Despite the fact that DataCon has to be imported via a hi-boot route,
 this module seems the right place for TyThing, because it's needed for
 funTyCon and all the types in TysPrim.
 
+Note [ATyCon for classes]
+~~~~~~~~~~~~~~~~~~~~~~~~~
+Both classes and type constructors are represented in the type environment
+as ATyCon.  You can tell the difference, and get to the class, with
+   isClassTyCon :: TyCon -> Bool
+   tyConClass_maybe :: TyCon -> Maybe Class
+The Class and its associated TyCon have the same Name.
+
 \begin{code}
 -- | A typecheckable-thing, essentially anything that has a name
-data TyThing = AnId     Id
-	     | ADataCon DataCon
-	     | ATyCon   TyCon
-             | ACoAxiom CoAxiom
-        deriving (Eq, Ord)
+data TyThing 
+  = AnId     Id
+  | ADataCon DataCon
+  | ATyCon   TyCon       -- TyCons and classes; see Note [ATyCon for classes]
+  | ACoAxiom CoAxiom
+  deriving (Eq, Ord)
 
 instance Outputable TyThing where 
   ppr = pprTyThing
@@ -336,12 +360,13 @@ instance NamedThing TyThing where	-- Can't put this with the type
 -- 3. The substition is only applied ONCE! This is because
 -- in general such application will not reached a fixed point.
 data TvSubst 		
-  = TvSubst InScopeSet 	-- The in-scope type variables
-	    TvSubstEnv	-- Substitution of types
+  = TvSubst InScopeSet 	-- The in-scope type and kind variables
+	    TvSubstEnv  -- Substitutes both type and kind variables
 	-- See Note [Apply Once]
 	-- and Note [Extending the TvSubstEnv]
 
 -- | A substitition of 'Type's for 'TyVar's
+--                 and 'Kind's for 'KindVar's
 type TvSubstEnv = TyVarEnv Type
 	-- A TvSubstEnv is used both inside a TvSubst (with the apply-once
 	-- invariant discussed in Note [Apply Once]), and also independently
@@ -431,16 +456,15 @@ pprParendKind = pprParendType
 
 ------------------
 pprEqPred :: Pair Type -> SDoc
-pprEqPred = ppr_eq_pred ppr_type
-
-ppr_eq_pred :: (Prec -> a -> SDoc) -> Pair a -> SDoc
-ppr_eq_pred pp (Pair ty1 ty2) = sep [ pp FunPrec ty1
-                                    , nest 2 (ptext (sLit "~"))
-                                    , pp FunPrec ty2]
-			       -- Precedence looks like (->) so that we get
-			       --    Maybe a ~ Bool
-			       --    (a->a) ~ Bool
-			       -- Note parens on the latter!
+-- NB: Maybe move to Coercion? It's only called after coercionKind anyway. 
+pprEqPred (Pair ty1 ty2) 
+  = sep [ ppr_type FunPrec ty1
+        , nest 2 (ptext (sLit "~#"))
+        , ppr_type FunPrec ty2]
+    -- Precedence looks like (->) so that we get
+    --    Maybe a ~ Bool
+    --    (a->a) ~ Bool
+    -- Note parens on the latter!
 
 ------------
 pprClassPred :: Class -> [Type] -> SDoc
@@ -487,7 +511,9 @@ instance Outputable Type where
     ppr ty = pprType ty
 
 instance Outputable name => OutputableBndr (IPName name) where
-    pprBndr _ n = ppr n	-- Simple for now
+    pprBndr _ n   = ppr n	-- Simple for now
+    pprInfixOcc  n = ppr n 
+    pprPrefixOcc n = ppr n 
 
 ------------------
 	-- OK, here's the main printer
@@ -575,9 +601,9 @@ pprTcApp _ pp tc [ty]
   | tc `hasKey` parrTyConKey = ptext (sLit "[:") <> pp TopPrec ty <> ptext (sLit ":]")
   | tc `hasKey` liftedTypeKindTyConKey   = ptext (sLit "*")
   | tc `hasKey` unliftedTypeKindTyConKey = ptext (sLit "#")
-  | tc `hasKey` openTypeKindTyConKey     = ptext (sLit "(?)")
+  | tc `hasKey` openTypeKindTyConKey     = ptext (sLit "OpenKind")
   | tc `hasKey` ubxTupleKindTyConKey     = ptext (sLit "(#)")
-  | tc `hasKey` argTypeKindTyConKey      = ptext (sLit "??")
+  | tc `hasKey` argTypeKindTyConKey      = ptext (sLit "ArgKind")
   | Just n <- tyConIP_maybe tc           = ppr n <> ptext (sLit "::") <> pp TopPrec ty
 
 pprTcApp p pp tc tys
@@ -585,7 +611,7 @@ pprTcApp p pp tc tys
   = tupleParens (tupleTyConSort tc) (sep (punctuate comma (map (pp TopPrec) tys)))
   | tc `hasKey` eqTyConKey -- We need to special case the type equality TyCon because
                            -- its not a SymOcc so won't get printed infix
-  , [ty1,ty2] <- tys
+  , [_, ty1,ty2] <- tys
   = pprInfixApp p pp (getName tc) ty1 ty2
   | otherwise
   = pprTypeNameApp p pp (getName tc) tys

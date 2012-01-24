@@ -11,6 +11,7 @@ module LlvmCodeGen.Ppr (
 import Llvm
 import LlvmCodeGen.Base
 import LlvmCodeGen.Data
+import LlvmCodeGen.Regs
 
 import CLabel
 import OldCmm
@@ -24,6 +25,16 @@ import Unique
 -- ----------------------------------------------------------------------------
 -- * Top level
 --
+
+-- | Header code for LLVM modules
+pprLlvmHeader :: Doc
+pprLlvmHeader =
+    moduleLayout
+    $+$ text ""
+    $+$ ppLlvmFunctionDecls (map snd ghcInternalFunctions)
+    $+$ ppLlvmMetas stgTBAA
+    $+$ text ""
+
 
 -- | LLVM module layout description for the host target
 moduleLayout :: Doc
@@ -62,11 +73,6 @@ moduleLayout =
     -- FIX: Other targets
     empty
 #endif
-
-
--- | Header code for LLVM modules
-pprLlvmHeader :: Doc
-pprLlvmHeader = moduleLayout
 
 
 -- | Pretty print LLVM data code

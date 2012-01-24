@@ -19,6 +19,14 @@
 -- * 'Id.Id': see "Id#name_types"
 --
 -- * 'Var.Var': see "Var#name_types"
+
+{-# OPTIONS -fno-warn-tabs #-}
+-- The above warning supression flag is a temporary kludge.
+-- While working on this module you are encouraged to remove it and
+-- detab the module (please do the detabbing in a separate patch). See
+--     http://hackage.haskell.org/trac/ghc/wiki/Commentary/CodingStyle#TabsvsSpaces
+-- for details
+
 module OccName (
 	-- * The 'NameSpace' type
 	NameSpace, -- Abstract
@@ -45,6 +53,7 @@ module OccName (
         mkDFunOcc,
 	mkTupleOcc, 
 	setOccNameSpace,
+        demoteOccName,
 
 	-- ** Derived 'OccName's
         isDerivedOccName,
@@ -58,7 +67,8 @@ module OccName (
 	mkSuperDictSelOcc, mkLocalOcc, mkMethodOcc, mkInstTyTcOcc,
 	mkInstTyCoOcc, mkEqPredCoOcc,
         mkVectOcc, mkVectTyConOcc, mkVectDataConOcc, mkVectIsoOcc,
-        mkPDataTyConOcc, mkPDataDataConOcc,
+        mkPDataTyConOcc,  mkPDataDataConOcc,
+	mkPDatasTyConOcc, mkPDatasDataConOcc,
         mkPReprTyConOcc, 
         mkPADFunOcc,
 
@@ -196,6 +206,15 @@ pprNameSpaceBrief DataName  = char 'd'
 pprNameSpaceBrief VarName   = char 'v'
 pprNameSpaceBrief TvName    = ptext (sLit "tv")
 pprNameSpaceBrief TcClsName = ptext (sLit "tc")
+
+-- demoteNameSpace lowers the NameSpace if possible.  We can not know
+-- in advance, since a TvName can appear in an HsTyVar.
+-- See Note [Demotion] in RnEnv
+demoteNameSpace :: NameSpace -> Maybe NameSpace
+demoteNameSpace VarName = Nothing
+demoteNameSpace DataName = Nothing
+demoteNameSpace TvName = Nothing
+demoteNameSpace TcClsName = Just DataName
 \end{code}
 
 
@@ -308,6 +327,13 @@ mkClsOcc = mkOccName clsName
 
 mkClsOccFS :: FastString -> OccName
 mkClsOccFS = mkOccNameFS clsName
+
+-- demoteOccName lowers the Namespace of OccName.
+-- see Note [Demotion]
+demoteOccName :: OccName -> Maybe OccName
+demoteOccName (OccName space name) = do
+  space' <- demoteNameSpace space
+  return $ OccName space' name
 \end{code}
 
 
@@ -327,7 +353,7 @@ sequentially starting at 0.
 
 So we can make a Unique using
 	mkUnique ns key  :: Unique
-where 'ns' is a Char reprsenting the name space.  This in turn makes it
+where 'ns' is a Char representing the name space.  This in turn makes it
 easy to build an OccEnv.
 
 \begin{code}
@@ -595,16 +621,21 @@ mkDataTOcc = mk_simple_deriv varName  "$t"
 mkDataCOcc = mk_simple_deriv varName  "$c"
 
 -- Vectorisation
-mkVectOcc, mkVectTyConOcc, mkVectDataConOcc, mkVectIsoOcc, mkPADFunOcc, mkPReprTyConOcc,
-  mkPDataTyConOcc, mkPDataDataConOcc :: Maybe String -> OccName -> OccName
-mkVectOcc         = mk_simple_deriv_with varName  "$v_"
-mkVectTyConOcc    = mk_simple_deriv_with tcName   ":V_"
-mkVectDataConOcc  = mk_simple_deriv_with dataName ":VD_"
-mkVectIsoOcc      = mk_simple_deriv_with varName  "$VI_"
-mkPADFunOcc       = mk_simple_deriv_with varName  "$PA_"
-mkPReprTyConOcc   = mk_simple_deriv_with tcName   ":VR_"
-mkPDataTyConOcc   = mk_simple_deriv_with tcName   ":VP_"
-mkPDataDataConOcc = mk_simple_deriv_with dataName ":VPD_"
+mkVectOcc, mkVectTyConOcc, mkVectDataConOcc, mkVectIsoOcc,
+ mkPADFunOcc,      mkPReprTyConOcc,
+ mkPDataTyConOcc,  mkPDataDataConOcc,
+ mkPDatasTyConOcc, mkPDatasDataConOcc
+  :: Maybe String -> OccName -> OccName
+mkVectOcc          = mk_simple_deriv_with varName  "$v"
+mkVectTyConOcc     = mk_simple_deriv_with tcName   "V:"
+mkVectDataConOcc   = mk_simple_deriv_with dataName "VD:"
+mkVectIsoOcc       = mk_simple_deriv_with varName  "$vi"
+mkPADFunOcc        = mk_simple_deriv_with varName  "$pa"
+mkPReprTyConOcc    = mk_simple_deriv_with tcName   "VR:"
+mkPDataTyConOcc    = mk_simple_deriv_with tcName   "VP:"
+mkPDatasTyConOcc   = mk_simple_deriv_with tcName   "VPs:"
+mkPDataDataConOcc  = mk_simple_deriv_with dataName "VPD:"
+mkPDatasDataConOcc = mk_simple_deriv_with dataName "VPDs:"
 
 mk_simple_deriv :: NameSpace -> String -> OccName -> OccName
 mk_simple_deriv sp px occ = mk_deriv sp px (occNameString occ)

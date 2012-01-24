@@ -63,7 +63,7 @@ typedef struct {
  */
 typedef struct _ObjectCode {
     OStatus    status;
-    char*      fileName;
+    pathchar  *fileName;
     int        fileSize;
     char*      formatName;            /* eg "ELF32", "DLL", "COFF", etc. */
 

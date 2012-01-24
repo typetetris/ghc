@@ -114,11 +114,13 @@ GhcDynamic=NO
 GhcProfiled=NO
 
 # Do we support shared libs?
-SharedLibsPlatformList = i386-unknown-linux x86_64-unknown-linux \
-	i386-unknown-freebsd x86_64-unknown-freebsd \
-	i386-unknown-openbsd x86_64-unknown-openbsd \
-	i386-unknown-mingw32 \
-	i386-apple-darwin powerpc-apple-darwin
+SharedLibsPlatformList =                        \
+    i386-unknown-linux   x86_64-unknown-linux   \
+    i386-unknown-freebsd x86_64-unknown-freebsd \
+    i386-unknown-openbsd x86_64-unknown-openbsd \
+    i386-unknown-netbsd  x86_64-unknown-netbsd  \
+    i386-unknown-mingw32                        \
+    i386-apple-darwin    x86_64-apple-darwin    powerpc-apple-darwin
 
 ifeq "$(SOLARIS_BROKEN_SHLD)" "NO"
 SharedLibsPlatformList += i386-unknown-solaris2
@@ -261,12 +263,11 @@ ifeq "$(BootingFromHc)" "NO"
 GhcRTSWays += debug 
 endif
 
-# Want the threaded versions unless we're unregisterised
-# Defer the check until later by using $(if..), because GhcUnregisterised might
-# be set in build.mk, which hasn't been read yet.
-GhcRTSWays += $(if $(findstring NO, $(GhcUnregisterised)),thr thr_debug thr_l,)
-GhcRTSWays += $(if $(findstring p, $(GhcLibWays)),$(if $(findstring NO, $(GhcUnregisterised)),thr_p,),)
-GhcRTSWays += $(if $(findstring dyn, $(GhcLibWays)), dyn debug_dyn $(if $(findstring NO, $(GhcUnregisterised)),thr_dyn thr_debug_dyn),)
+# We always have the threaded versions, but note that SMP support may be disabled
+# (see GhcWithSMP).
+GhcRTSWays += thr thr_debug thr_l
+GhcRTSWays += $(if $(findstring p, $(GhcLibWays)),thr_p,)
+GhcRTSWays += $(if $(findstring dyn, $(GhcLibWays)),dyn debug_dyn thr_dyn thr_debug_dyn,)
 
 # We can only build GHCi threaded if we have a threaded RTS:
 GhcThreaded = $(if $(findstring thr,$(GhcRTSWays)),YES,NO)
@@ -526,9 +527,6 @@ GhcPatchLevel	= @GhcPatchLevel@
 GhcMajVersion	= @GhcMajVersion@
 GhcMinVersion	= @GhcMinVersion@
 
-# Keep this in sync with the variables in package-config.mk
-ghc_ge_613 = @ghc_ge_613@
-
 # Canonicalised ghc version number, used for easy (integer) version
 # comparisons.  We must expand $(GhcMinVersion) to two digits by
 # adding a leading zero if necessary:
@@ -680,6 +678,9 @@ DTRACE			= @DtraceCmd@
 LD = @LdCmd@
 NM = @NmCmd@
 
+LLC = @LlcCmd@
+OPT = @OptCmd@
+
 # Some ld's support the -x flag and some don't, so the configure
 # script detects which we have and sets LdXFlag to "-x" or ""
 # respectively.
@@ -692,6 +693,10 @@ LdIsGNULd		= @LdIsGNULd@
 # Set to YES if ld has the --build-id flag.  Sometimes we need to
 # disable it with --build-id=none.
 LdHasBuildId	        = @LdHasBuildId@
+
+# Set to YES if ld has the --no_compact_unwind flag. See #5019
+# and compiler/main/DriverPipeline.hs.
+LdHasNoCompactUnwind	= @LdHasNoCompactUnwind@
 
 # On MSYS, building with SplitObjs=YES fails with 
 #   ar: Bad file number
@@ -733,6 +738,14 @@ PATCH_CMD      = @PatchCmd@
 TAR_CMD        = @TarCmd@
 BZIP2_CMD      = bzip2
 GZIP_CMD       = gzip
+
+ifeq "$(Windows)" "YES"
+TOUCH_CMD      = $(utils/touchy_dist_INPLACE)
+TOUCH_DEP      = $(TOUCH_CMD)
+else
+TOUCH_CMD      = touch
+TOUCH_DEP      =
+endif
 
 HSCOLOUR_CMD   = @HSCOLOUR@
 

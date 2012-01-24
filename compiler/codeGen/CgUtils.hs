@@ -233,23 +233,22 @@ emitRtsCall
    :: PackageId                 -- ^ package the function is in
    -> FastString                -- ^ name of function
    -> [CmmHinted CmmExpr]       -- ^ function args
-   -> Bool                      -- ^ whether this is a safe call
    -> Code                      -- ^ cmm code
 
-emitRtsCall pkg fun args safe = emitRtsCallGen [] pkg fun args Nothing safe
+emitRtsCall pkg fun args = emitRtsCallGen [] pkg fun args Nothing
    -- The 'Nothing' says "save all global registers"
 
-emitRtsCallWithVols :: PackageId -> FastString -> [CmmHinted CmmExpr] -> [GlobalReg] -> Bool -> Code
-emitRtsCallWithVols pkg fun args vols safe
-   = emitRtsCallGen [] pkg fun args (Just vols) safe
+emitRtsCallWithVols :: PackageId -> FastString -> [CmmHinted CmmExpr] -> [GlobalReg] -> Code
+emitRtsCallWithVols pkg fun args vols
+   = emitRtsCallGen [] pkg fun args (Just vols)
 
 emitRtsCallWithResult
    :: LocalReg -> ForeignHint
    -> PackageId -> FastString
-   -> [CmmHinted CmmExpr] -> Bool -> Code
+   -> [CmmHinted CmmExpr] -> Code
 
-emitRtsCallWithResult res hint pkg fun args safe
-   = emitRtsCallGen [CmmHinted res hint] pkg fun args Nothing safe
+emitRtsCallWithResult res hint pkg fun args
+   = emitRtsCallGen [CmmHinted res hint] pkg fun args Nothing
 
 -- Make a call to an RTS C procedure
 emitRtsCallGen
@@ -258,14 +257,10 @@ emitRtsCallGen
    -> FastString
    -> [CmmHinted CmmExpr]
    -> Maybe [GlobalReg]
-   -> Bool -- True <=> CmmSafe call
    -> Code
-emitRtsCallGen res pkg fun args vols safe = do
-  safety <- if safe
-            then getSRTInfo >>= (return . CmmSafe)
-            else return CmmUnsafe
+emitRtsCallGen res pkg fun args vols = do
   stmtsC caller_save
-  stmtC (CmmCall target res args safety CmmMayReturn)
+  stmtC (CmmCall target res args CmmMayReturn)
   stmtsC caller_load
   where
     (caller_save, caller_load) = callerSaveVolatileRegs vols
@@ -291,7 +286,7 @@ callerSaveVolatileRegs vols = (caller_save, caller_load)
     caller_save = foldr ($!) [] (map callerSaveGlobalReg    regs_to_save)
     caller_load = foldr ($!) [] (map callerRestoreGlobalReg regs_to_save)
 
-    system_regs = [Sp,SpLim,Hp,HpLim,CurrentTSO,CurrentNursery,
+    system_regs = [Sp,SpLim,Hp,HpLim,CCCS,CurrentTSO,CurrentNursery,
                    {-SparkHd,SparkTl,SparkBase,SparkLim,-}BaseReg ]
 
     regs_to_save = system_regs ++ vol_list
@@ -350,6 +345,12 @@ callerSaves (VanillaReg 7 _)    = True
 #ifdef CALLER_SAVES_R8
 callerSaves (VanillaReg 8 _)    = True
 #endif
+#ifdef CALLER_SAVES_R9
+callerSaves (VanillaReg 9 _)    = True
+#endif
+#ifdef CALLER_SAVES_R10
+callerSaves (VanillaReg 10 _)   = True
+#endif
 #ifdef CALLER_SAVES_F1
 callerSaves (FloatReg 1)        = True
 #endif
@@ -383,6 +384,9 @@ callerSaves Hp                  = True
 #ifdef CALLER_SAVES_HpLim
 callerSaves HpLim               = True
 #endif
+#ifdef CALLER_SAVES_CCCS
+callerSaves CCCS                = True
+#endif
 #ifdef CALLER_SAVES_CurrentTSO
 callerSaves CurrentTSO          = True
 #endif
@@ -407,17 +411,22 @@ baseRegOffset (VanillaReg 7 _)    = oFFSET_StgRegTable_rR7
 baseRegOffset (VanillaReg 8 _)    = oFFSET_StgRegTable_rR8
 baseRegOffset (VanillaReg 9 _)    = oFFSET_StgRegTable_rR9
 baseRegOffset (VanillaReg 10 _)   = oFFSET_StgRegTable_rR10
+baseRegOffset (VanillaReg n _)    = panic ("Registers above R10 are not supported (tried to use R" ++ show n ++ ")")
 baseRegOffset (FloatReg  1)       = oFFSET_StgRegTable_rF1
 baseRegOffset (FloatReg  2)       = oFFSET_StgRegTable_rF2
 baseRegOffset (FloatReg  3)       = oFFSET_StgRegTable_rF3
 baseRegOffset (FloatReg  4)       = oFFSET_StgRegTable_rF4
+baseRegOffset (FloatReg  n)       = panic ("Registers above F4 are not supported (tried to use F" ++ show n ++ ")")
 baseRegOffset (DoubleReg 1)       = oFFSET_StgRegTable_rD1
 baseRegOffset (DoubleReg 2)       = oFFSET_StgRegTable_rD2
+baseRegOffset (DoubleReg n)       = panic ("Registers above D2 are not supported (tried to use D" ++ show n ++ ")")
 baseRegOffset Sp                  = oFFSET_StgRegTable_rSp
 baseRegOffset SpLim               = oFFSET_StgRegTable_rSpLim
 baseRegOffset (LongReg 1)         = oFFSET_StgRegTable_rL1
+baseRegOffset (LongReg n)         = panic ("Registers above L1 are not supported (tried to use L" ++ show n ++ ")")
 baseRegOffset Hp                  = oFFSET_StgRegTable_rHp
 baseRegOffset HpLim               = oFFSET_StgRegTable_rHpLim
+baseRegOffset CCCS                = oFFSET_StgRegTable_rCCCS
 baseRegOffset CurrentTSO          = oFFSET_StgRegTable_rCurrentTSO
 baseRegOffset CurrentNursery      = oFFSET_StgRegTable_rCurrentNursery
 baseRegOffset HpAlloc             = oFFSET_StgRegTable_rHpAlloc
@@ -425,7 +434,7 @@ baseRegOffset EagerBlackholeInfo  = oFFSET_stgEagerBlackholeInfo
 baseRegOffset GCEnter1            = oFFSET_stgGCEnter1
 baseRegOffset GCFun               = oFFSET_stgGCFun
 baseRegOffset BaseReg             = panic "baseRegOffset:BaseReg"
-baseRegOffset _                   = panic "baseRegOffset:other"
+baseRegOffset PicBaseReg          = panic "baseRegOffset:PicBaseReg"
 
 
 -------------------------------------------------------------------------
@@ -917,6 +926,12 @@ activeStgRegs = [
 #ifdef REG_R8
     ,VanillaReg 8 VGcPtr
 #endif
+#ifdef REG_R9
+    ,VanillaReg 9 VGcPtr
+#endif
+#ifdef REG_R10
+    ,VanillaReg 10 VGcPtr
+#endif
 #ifdef REG_SpLim
     ,SpLim
 #endif
@@ -993,19 +1008,19 @@ fixStgRegStmt stmt
 
         CmmStore addr src -> CmmStore (fixStgRegExpr addr) (fixStgRegExpr src)
 
-        CmmCall target regs args srt returns ->
+        CmmCall target regs args returns ->
             let target' = case target of
                     CmmCallee e conv -> CmmCallee (fixStgRegExpr e) conv
                     other            -> other
                 args' = map (\(CmmHinted arg hint) ->
                                 (CmmHinted (fixStgRegExpr arg) hint)) args
-            in CmmCall target' regs args' srt returns
+            in CmmCall target' regs args' returns
 
         CmmCondBranch test dest -> CmmCondBranch (fixStgRegExpr test) dest
 
         CmmSwitch expr ids -> CmmSwitch (fixStgRegExpr expr) ids
 
-        CmmJump addr regs -> CmmJump (fixStgRegExpr addr) regs
+        CmmJump addr live -> CmmJump (fixStgRegExpr addr) live
 
         -- CmmNop, CmmComment, CmmBranch, CmmReturn
         _other -> stmt

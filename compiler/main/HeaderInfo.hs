@@ -8,6 +8,13 @@
 --
 -----------------------------------------------------------------------------
 
+{-# OPTIONS -fno-warn-tabs #-}
+-- The above warning supression flag is a temporary kludge.
+-- While working on this module you are encouraged to remove it and
+-- detab the module (please do the detabbing in a separate patch). See
+--     http://hackage.haskell.org/trac/ghc/wiki/Commentary/CodingStyle#TabsvsSpaces
+-- for details
+
 module HeaderInfo ( getImports
                   , mkPrelImports -- used by the renamer too
                   , getOptionsFromFile, getOptions
@@ -116,7 +123,7 @@ mkPrelImports this_mod loc implicit_prelude import_decls
       		    	       ideclAs        = Nothing,
       		    	       ideclHiding    = Nothing  }
 
-parseError :: SrcSpan -> Message -> IO a
+parseError :: SrcSpan -> MsgDoc -> IO a
 parseError span err = throwOneError $ mkPlainErrMsg span err
 
 --------------------------------------------------------------
@@ -134,8 +141,17 @@ getOptionsFromFile dflags filename
 	      (openBinaryFile filename ReadMode)
               (hClose)
               (\handle -> do
-                  opts <- fmap getOptions' $ lazyGetToks dflags filename handle
+                  opts <- fmap getOptions' $ lazyGetToks dflags' filename handle
                   seqList opts $ return opts)
+    where -- We don't need to get haddock doc tokens when we're just
+          -- getting the options from pragmas, and lazily lexing them
+          -- correctly is a little tricky: If there is "\n" or "\n-"
+          -- left at the end of a buffer then the haddock doc may
+          -- continue past the end of the buffer, despite the fact that
+          -- we already have an apparently-complete token.
+          -- We therefore just turn Opt_Haddock off when doing the lazy
+          -- lex.
+          dflags' = dopt_unset dflags Opt_Haddock
 
 blockSize :: Int
 -- blockSize = 17 -- for testing :-)
@@ -230,9 +246,6 @@ getOptions' toks
           parseToks (open:xs)
               | ITlanguage_prag <- getToken open
               = parseLanguage xs
-          parseToks (x:xs)
-              | ITdocCommentNext _ <- getToken x
-              = parseToks xs
           parseToks _ = []
           parseLanguage (L loc (ITconid fs):rest)
               = checkExtension (L loc fs) :

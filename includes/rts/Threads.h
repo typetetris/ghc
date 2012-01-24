@@ -20,8 +20,9 @@
 //
 StgTSO *createThread (Capability *cap, nat stack_size);
 
-Capability *scheduleWaitThread (StgTSO *tso, /*out*/HaskellObj* ret,
-				Capability *cap);
+void scheduleWaitThread (/* in    */ StgTSO *tso,
+                         /* out   */ HaskellObj* ret,
+                         /* inout */ Capability **cap);
 
 StgTSO *createGenThread       (Capability *cap, nat stack_size,  
 			       StgClosure *closure);
@@ -55,5 +56,11 @@ extern unsigned int n_capabilities;
 #if !IN_STG_CODE
 extern Capability MainCapability;
 #endif
+
+//
+// Change the number of capabilities (only supports increasing the
+// current value at the moment).
+//
+extern void setNumCapabilities (nat new);
 
 #endif /* RTS_THREADS_H */

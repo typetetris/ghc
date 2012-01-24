@@ -7,6 +7,13 @@
 			-----------------
 
 \begin{code}
+{-# OPTIONS -fno-warn-tabs #-}
+-- The above warning supression flag is a temporary kludge.
+-- While working on this module you are encouraged to remove it and
+-- detab the module (please do the detabbing in a separate patch). See
+--     http://hackage.haskell.org/trac/ghc/wiki/Commentary/CodingStyle#TabsvsSpaces
+-- for details
+
 module DmdAnal ( dmdAnalPgm, dmdAnalTopRhs, 
 		 both {- needed by WwLib -}
    ) where
@@ -166,8 +173,8 @@ dmdAnal env dmd (Cast e co)
 	-- inside recursive products -- we might not reach
 	-- a fixpoint.  So revert to a vanilla Eval demand
 
-dmdAnal env dmd (Note n e)
-  = (dmd_ty, Note n e')
+dmdAnal env dmd (Tick t e)
+  = (dmd_ty, Tick t e')
   where
     (dmd_ty, e') = dmdAnal env dmd e
 
@@ -258,17 +265,26 @@ dmdAnal env dmd (Case scrut case_bndr ty [alt@(DataAlt dc, _, _)])
 			     idDemandInfo case_bndr'
 
 	(scrut_ty, scrut') = dmdAnal env scrut_dmd scrut
+        res_ty =           alt_ty1 `bothType` scrut_ty
     in
-    (alt_ty1 `bothType` scrut_ty, Case scrut' case_bndr' ty [alt'])
+--    pprTrace "dmdAnal:Case1" (vcat [ text "scrut" <+> ppr scrut
+--                                  , text "scrut_ty" <+> ppr scrut_ty
+--                                  , text "alt_ty" <+> ppr alt_ty1
+--                                  , text "res_ty" <+> ppr res_ty ]) $
+    (res_ty, Case scrut' case_bndr' ty [alt'])
 
 dmdAnal env dmd (Case scrut case_bndr ty alts)
   = let
 	(alt_tys, alts')        = mapAndUnzip (dmdAnalAlt env dmd) alts
 	(scrut_ty, scrut')      = dmdAnal env evalDmd scrut
 	(alt_ty, case_bndr')	= annotateBndr (foldr1 lubType alt_tys) case_bndr
+        res_ty                  = alt_ty `bothType` scrut_ty
     in
---    pprTrace "dmdAnal:Case" (ppr alts $$ ppr alt_tys)
-    (alt_ty `bothType` scrut_ty, Case scrut' case_bndr' ty alts')
+--    pprTrace "dmdAnal:Case2" (vcat [ text "scrut" <+> ppr scrut
+--                                   , text "scrut_ty" <+> ppr scrut_ty
+--                                   , text "alt_ty" <+> ppr alt_ty
+--                                   , text "res_ty" <+> ppr res_ty ]) $
+    (res_ty, Case scrut' case_bndr' ty alts')
 
 dmdAnal env dmd (Let (NonRec id rhs) body)
   = let
@@ -330,7 +346,7 @@ dmdAnalAlt env dmd (con,bndrs,rhs)
 	--	   other      -> return ()
 	-- So the 'y' isn't necessarily going to be evaluated
 	--
-	-- A more complete example where this shows up is:
+	-- A more complete example (Trac #148, #1592) where this shows up is:
 	--	do { let len = <expensive> ;
 	--	   ; when (...) (exitWith ExitSuccess)
 	--	   ; print len }

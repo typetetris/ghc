@@ -7,6 +7,13 @@
 -- -----------------------------------------------------------------------------
 
 \begin{code}
+{-# OPTIONS -fno-warn-tabs #-}
+-- The above warning supression flag is a temporary kludge.
+-- While working on this module you are encouraged to remove it and
+-- detab the module (please do the detabbing in a separate patch). See
+--     http://hackage.haskell.org/trac/ghc/wiki/Commentary/CodingStyle#TabsvsSpaces
+-- for details
+
 module AsmCodeGen ( nativeCodeGen ) where
 
 #include "HsVersions.h"
@@ -150,7 +157,8 @@ data NcgImpl statics instr jumpDest = NcgImpl {
 --------------------
 nativeCodeGen :: DynFlags -> Handle -> UniqSupply -> [RawCmmGroup] -> IO ()
 nativeCodeGen dflags h us cmms
- = let nCG' :: (PlatformOutputable statics, PlatformOutputable instr, Instruction instr) => NcgImpl statics instr jumpDest -> IO ()
+ = let platform = targetPlatform dflags
+       nCG' :: (PlatformOutputable statics, PlatformOutputable instr, Instruction instr) => NcgImpl statics instr jumpDest -> IO ()
        nCG' ncgImpl = nativeCodeGen' dflags ncgImpl h us cmms
        x86NcgImpl = NcgImpl {
                          cmmTopCodeGen             = X86.CodeGen.cmmTopCodeGen
@@ -160,13 +168,13 @@ nativeCodeGen dflags h us cmms
                         ,shortcutStatics           = X86.Instr.shortcutStatics
                         ,shortcutJump              = X86.Instr.shortcutJump
                         ,pprNatCmmDecl              = X86.Ppr.pprNatCmmDecl
-                        ,maxSpillSlots             = X86.Instr.maxSpillSlots
+                        ,maxSpillSlots             = X86.Instr.maxSpillSlots (target32Bit platform)
                         ,allocatableRegs           = X86.Regs.allocatableRegs
                         ,ncg_x86fp_kludge          = id
                         ,ncgExpandTop              = id
                         ,ncgMakeFarBranches        = id
                     }
-   in case platformArch $ targetPlatform dflags of
+   in case platformArch platform of
                  ArchX86    -> nCG' (x86NcgImpl { ncg_x86fp_kludge = map x86fp_kludge })
                  ArchX86_64 -> nCG' x86NcgImpl
                  ArchPPC ->
@@ -297,10 +305,10 @@ cmmNativeGens dflags ncgImpl h us (cmm : cmms) impAcc profAcc count
         let platform = targetPlatform dflags
 
  	(us', native, imports, colorStats, linearStats)
-		<- cmmNativeGen dflags ncgImpl us cmm count
+                <- {-# SCC "cmmNativeGen" #-} cmmNativeGen dflags ncgImpl us cmm count
 
-	Pretty.bufLeftRender h
-		$ {-# SCC "pprNativeCode" #-} Pretty.vcat $ map (pprNatCmmDecl ncgImpl platform) native
+        {-# SCC "pprNativeCode" #-} Pretty.bufLeftRender h
+                $ Pretty.vcat $ map (pprNatCmmDecl ncgImpl platform) native
 
            -- carefully evaluate this strictly.  Binding it with 'let'
            -- and then using 'seq' doesn't work, because the let
@@ -314,7 +322,7 @@ cmmNativeGens dflags ncgImpl h us (cmm : cmms) impAcc profAcc count
 	count' <- return $! count + 1;
 
 	-- force evaulation all this stuff to avoid space leaks
-	seqString (showSDoc $ vcat $ map (pprPlatform platform) imports) `seq` return ()
+        {-# SCC "seqString" #-} seqString (showSDoc $ vcat $ map (pprPlatform platform) imports) `seq` return ()
 
 	cmmNativeGens dflags ncgImpl
             h us' cmms
@@ -500,28 +508,32 @@ x86fp_kludge (CmmProc info lbl (ListGraph code)) =
 makeImportsDoc :: DynFlags -> [CLabel] -> Pretty.Doc
 makeImportsDoc dflags imports
  = dyld_stubs imports
-
-#if HAVE_SUBSECTIONS_VIA_SYMBOLS
-                -- On recent versions of Darwin, the linker supports
-                -- dead-stripping of code and data on a per-symbol basis.
-                -- There's a hack to make this work in PprMach.pprNatCmmDecl.
-            Pretty.$$ Pretty.text ".subsections_via_symbols"
-#endif
-#if HAVE_GNU_NONEXEC_STACK
+            Pretty.$$
+            -- On recent versions of Darwin, the linker supports
+            -- dead-stripping of code and data on a per-symbol basis.
+            -- There's a hack to make this work in PprMach.pprNatCmmDecl.
+            (if platformHasSubsectionsViaSymbols (targetPlatform dflags)
+             then Pretty.text ".subsections_via_symbols"
+             else Pretty.empty)
+            Pretty.$$ 
                 -- On recent GNU ELF systems one can mark an object file
                 -- as not requiring an executable stack. If all objects
                 -- linked into a program have this note then the program
                 -- will not use an executable stack, which is good for
                 -- security. GHC generated code does not need an executable
                 -- stack so add the note in:
-            Pretty.$$ Pretty.text ".section .note.GNU-stack,\"\",@progbits"
-#endif
+            (if platformHasGnuNonexecStack (targetPlatform dflags)
+             then Pretty.text ".section .note.GNU-stack,\"\",@progbits"
+             else Pretty.empty)
+            Pretty.$$
                 -- And just because every other compiler does, lets stick in
-		-- an identifier directive: .ident "GHC x.y.z"
-            Pretty.$$ let compilerIdent = Pretty.text "GHC" Pretty.<+>
-	                                  Pretty.text cProjectVersion
-                       in Pretty.text ".ident" Pretty.<+>
-                          Pretty.doubleQuotes compilerIdent
+                -- an identifier directive: .ident "GHC x.y.z"
+            (if platformHasIdentDirective (targetPlatform dflags)
+             then let compilerIdent = Pretty.text "GHC" Pretty.<+>
+	                              Pretty.text cProjectVersion
+                   in Pretty.text ".ident" Pretty.<+>
+                      Pretty.doubleQuotes compilerIdent
+             else Pretty.empty)
 
  where
 	-- Generate "symbol stubs" for all external symbols that might
@@ -813,7 +825,8 @@ Ideas for other things we could do (put these in Hoopl please!):
 cmmToCmm :: DynFlags -> RawCmmDecl -> (RawCmmDecl, [CLabel])
 cmmToCmm _ top@(CmmData _ _) = (top, [])
 cmmToCmm dflags (CmmProc info lbl (ListGraph blocks)) = runCmmOpt dflags $ do
-  blocks' <- mapM cmmBlockConFold (cmmMiniInline (cmmEliminateDeadBlocks blocks))
+  let platform = targetPlatform dflags
+  blocks' <- mapM cmmBlockConFold (cmmMiniInline platform (cmmEliminateDeadBlocks blocks))
   return $ CmmProc info lbl (ListGraph blocks')
 
 newtype CmmOptM a = CmmOptM (([CLabel], DynFlags) -> (# a, [CLabel] #))
@@ -830,8 +843,8 @@ instance Monad CmmOptM where
 addImportCmmOpt :: CLabel -> CmmOptM ()
 addImportCmmOpt lbl = CmmOptM $ \(imports, _dflags) -> (# (), lbl:imports #)
 
-getDynFlagsCmmOpt :: CmmOptM DynFlags
-getDynFlagsCmmOpt = CmmOptM $ \(imports, dflags) -> (# dflags, imports #)
+instance HasDynFlags CmmOptM where
+    getDynFlags = CmmOptM $ \(imports, dflags) -> (# dflags, imports #)
 
 runCmmOpt :: DynFlags -> CmmOptM a -> (a, [CLabel])
 runCmmOpt dflags (CmmOptM f) = case f ([], dflags) of
@@ -865,11 +878,11 @@ cmmStmtConFold stmt
                  src'  <- cmmExprConFold DataReference src
                  return $ CmmStore addr' src'
 
-        CmmJump addr regs
+        CmmJump addr live
            -> do addr' <- cmmExprConFold JumpReference addr
-                 return $ CmmJump addr' regs
+                 return $ CmmJump addr' live
 
-	CmmCall target regs args srt returns
+        CmmCall target regs args returns
 	   -> do target' <- case target of
 			      CmmCallee e conv -> do
 			        e' <- cmmExprConFold CallReference e
@@ -878,11 +891,11 @@ cmmStmtConFold stmt
                  args' <- mapM (\(CmmHinted arg hint) -> do
                                   arg' <- cmmExprConFold DataReference arg
                                   return (CmmHinted arg' hint)) args
-	         return $ CmmCall target' regs args' srt returns
+                 return $ CmmCall target' regs args' returns
 
         CmmCondBranch test dest
            -> do test' <- cmmExprConFold DataReference test
-                 dflags <- getDynFlagsCmmOpt
+                 dflags <- getDynFlags
                  let platform = targetPlatform dflags
 	         return $ case test' of
 		   CmmLit (CmmInt 0 _) -> 
@@ -901,25 +914,27 @@ cmmStmtConFold stmt
 
 cmmExprConFold :: ReferenceKind -> CmmExpr -> CmmOptM CmmExpr
 cmmExprConFold referenceKind expr = do
-    dflags <- getDynFlagsCmmOpt
+    dflags <- getDynFlags
     -- Skip constant folding if new code generator is running
     -- (this optimization is done in Hoopl)
     let expr' = if dopt Opt_TryNewCodeGen dflags
                     then expr
-                    else cmmExprCon expr
+                    else cmmExprCon (targetPlatform dflags) expr
     cmmExprNative referenceKind expr'
 
-cmmExprCon :: CmmExpr -> CmmExpr
-cmmExprCon (CmmLoad addr rep) = CmmLoad (cmmExprCon addr) rep
-cmmExprCon (CmmMachOp mop args) = cmmMachOpFold mop (map cmmExprCon args)
-cmmExprCon other = other
+cmmExprCon :: Platform -> CmmExpr -> CmmExpr
+cmmExprCon platform (CmmLoad addr rep) = CmmLoad (cmmExprCon platform addr) rep
+cmmExprCon platform (CmmMachOp mop args)
+    = cmmMachOpFold platform mop (map (cmmExprCon platform) args)
+cmmExprCon _ other = other
 
 -- handles both PIC and non-PIC cases... a very strange mixture
 -- of things to do.
 cmmExprNative :: ReferenceKind -> CmmExpr -> CmmOptM CmmExpr
 cmmExprNative referenceKind expr = do
-     dflags <- getDynFlagsCmmOpt
-     let arch = platformArch (targetPlatform dflags)
+     dflags <- getDynFlags
+     let platform = targetPlatform dflags
+         arch = platformArch platform
      case expr of
         CmmLoad addr rep
            -> do addr' <- cmmExprNative DataReference addr
@@ -936,7 +951,7 @@ cmmExprNative referenceKind expr = do
            -> do
                  dynRef <- cmmMakeDynamicReference dflags addImportCmmOpt referenceKind lbl
                  -- need to optimize here, since it's late
-                 return $ cmmMachOpFold (MO_Add wordWidth) [
+                 return $ cmmMachOpFold platform (MO_Add wordWidth) [
                      dynRef,
                      (CmmLit $ CmmInt (fromIntegral off) wordWidth)
                    ]

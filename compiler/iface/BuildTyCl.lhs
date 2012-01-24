@@ -4,13 +4,21 @@
 %
 
 \begin{code}
+{-# OPTIONS -fno-warn-tabs #-}
+-- The above warning supression flag is a temporary kludge.
+-- While working on this module you are encouraged to remove it and
+-- detab the module (please do the detabbing in a separate patch). See
+--     http://hackage.haskell.org/trac/ghc/wiki/Commentary/CodingStyle#TabsvsSpaces
+-- for details
+
 module BuildTyCl (
-	buildSynTyCon, 
+        buildSynTyCon,
         buildAlgTyCon, 
         buildDataCon,
+        buildPromotedDataTyCon,
         TcMethInfo, buildClass,
-	distinctAbstractTyConRhs, totallyAbstractTyConRhs,
-	mkNewTyConRhs, mkDataTyConRhs, 
+        distinctAbstractTyConRhs, totallyAbstractTyConRhs,
+        mkNewTyConRhs, mkDataTyConRhs, 
         newImplicitBinder
     ) where
 
@@ -27,11 +35,13 @@ import MkId
 import Class
 import TyCon
 import Type
+import Kind             ( promoteType, isPromotableType )
 import Coercion
 
 import TcRnMonad
 import Util		( isSingleton )
 import Outputable
+import Unique           ( getUnique )
 \end{code}
 	
 
@@ -39,71 +49,28 @@ import Outputable
 ------------------------------------------------------
 buildSynTyCon :: Name -> [TyVar] 
               -> SynTyConRhs
-	      -> Kind			-- ^ Kind of the RHS
-	      -> TyConParent
-	      -> Maybe (TyCon, [Type])    -- ^ family instance if applicable
+              -> Kind                   -- ^ Kind of the RHS
+              -> TyConParent
               -> TcRnIf m n TyCon
-buildSynTyCon tc_name tvs rhs rhs_kind parent mb_family 
-  | Just fam_inst_info <- mb_family
-  = ASSERT( isNoParent parent )
-    fixM $ \ tycon_rec -> do 
-    { fam_parent <- mkFamInstParentInfo tc_name tvs fam_inst_info tycon_rec 
-    ; return (mkSynTyCon tc_name kind tvs rhs fam_parent) }
-
-  | otherwise
+buildSynTyCon tc_name tvs rhs rhs_kind parent 
   = return (mkSynTyCon tc_name kind tvs rhs parent)
-  where
-    kind = mkArrowKinds (map tyVarKind tvs) rhs_kind
+  where kind = mkPiKinds tvs rhs_kind
 
 ------------------------------------------------------
-buildAlgTyCon :: Name -> [TyVar] 
-	      -> ThetaType		-- ^ Stupid theta
+buildAlgTyCon :: Name 
+              -> [TyVar]               -- ^ Kind variables and type variables
+	      -> ThetaType	       -- ^ Stupid theta
 	      -> AlgTyConRhs
 	      -> RecFlag
-	      -> Bool			-- ^ True <=> was declared in GADT syntax
+	      -> Bool		       -- ^ True <=> was declared in GADT syntax
               -> TyConParent
-	      -> Maybe (TyCon, [Type])  -- ^ family instance if applicable
-	      -> TcRnIf m n TyCon
+	      -> TyCon
 
-buildAlgTyCon tc_name tvs stupid_theta rhs is_rec gadt_syn
-	      parent mb_family
-  | Just fam_inst_info <- mb_family
-  = -- We need to tie a knot as the coercion of a data instance depends
-     -- on the instance representation tycon and vice versa.
-    ASSERT( isNoParent parent )
-    fixM $ \ tycon_rec -> do 
-    { fam_parent <- mkFamInstParentInfo tc_name tvs fam_inst_info tycon_rec
-    ; return (mkAlgTyCon tc_name kind tvs stupid_theta rhs
-		         fam_parent is_rec gadt_syn) }
+buildAlgTyCon tc_name ktvs stupid_theta rhs is_rec gadt_syn parent
+  = mkAlgTyCon tc_name kind ktvs stupid_theta rhs parent is_rec gadt_syn
+  where 
+    kind = mkPiKinds ktvs liftedTypeKind
 
-  | otherwise
-  = return (mkAlgTyCon tc_name kind tvs stupid_theta rhs
-	               parent is_rec gadt_syn)
-  where
-    kind = mkArrowKinds (map tyVarKind tvs) liftedTypeKind
-
--- | If a family tycon with instance types is given, the current tycon is an
--- instance of that family and we need to
---
--- (1) create a coercion that identifies the family instance type and the
---     representation type from Step (1); ie, it is of the form 
---	   `Co tvs :: F ts ~ R tvs', where `Co' is the name of the coercion,
---	   `F' the family tycon and `R' the (derived) representation tycon,
---	   and
--- (2) produce a `TyConParent' value containing the parent and coercion
---     information.
---
-mkFamInstParentInfo :: Name -> [TyVar] 
-             	    -> (TyCon, [Type]) 
-             	    -> TyCon 
-             	    -> TcRnIf m n TyConParent
-mkFamInstParentInfo tc_name tvs (family, instTys) rep_tycon
-  = do { -- Create the coercion
-       ; co_tycon_name <- newImplicitBinder tc_name mkInstTyCoOcc
-       ; let co_tycon = mkFamInstCo co_tycon_name tvs
-                                    family instTys rep_tycon
-       ; return $ FamInstTyCon family instTys co_tycon }
-    
 ------------------------------------------------------
 distinctAbstractTyConRhs, totallyAbstractTyConRhs :: AlgTyConRhs
 distinctAbstractTyConRhs = AbstractTyCon True
@@ -217,6 +184,11 @@ mkDataConStupidTheta tycon arg_tys univ_tvs
     arg_tyvars      = tyVarsOfTypes arg_tys
     in_arg_tys pred = not $ isEmptyVarSet $ 
 		      tyVarsOfType pred `intersectVarSet` arg_tyvars
+
+buildPromotedDataTyCon :: DataCon -> TyCon
+buildPromotedDataTyCon dc = ASSERT ( isPromotableType ty )
+  mkPromotedDataTyCon dc (getName dc) (getUnique dc) (promoteType ty)
+  where ty = dataConUserType dc
 \end{code}
 
 
@@ -294,7 +266,7 @@ buildClass no_unf tycon_name tvs sc_theta fds at_items sig_stuff tc_isrec
 		 then mkNewTyConRhs tycon_name rec_tycon dict_con
 		 else return (mkDataTyConRhs [dict_con])
 
-	; let {	clas_kind = mkArrowKinds (map tyVarKind tvs) constraintKind
+	; let {	clas_kind = mkPiKinds tvs constraintKind
 
  	      ; tycon = mkClassTyCon tycon_name clas_kind tvs
  	                             rhs rec_clas tc_isrec

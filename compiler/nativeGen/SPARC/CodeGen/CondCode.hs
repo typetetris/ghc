@@ -1,4 +1,11 @@
 
+{-# OPTIONS -fno-warn-tabs #-}
+-- The above warning supression flag is a temporary kludge.
+-- While working on this module you are encouraged to remove it and
+-- detab the module (please do the detabbing in a separate patch). See
+--     http://hackage.haskell.org/trac/ghc/wiki/Commentary/CodingStyle#TabsvsSpaces
+-- for details
+
 module SPARC.CodeGen.CondCode (
 	getCondCode,
 	condIntCode,
@@ -55,10 +62,10 @@ getCondCode (CmmMachOp mop [x, y])
       MO_U_Lt _   -> condIntCode LU   x y
       MO_U_Le _   -> condIntCode LEU  x y
 
-      _           -> do dflags <- getDynFlagsNat
+      _           -> do dflags <- getDynFlags
                         pprPanic "SPARC.CodeGen.CondCode.getCondCode" (pprPlatform (targetPlatform dflags) (CmmMachOp mop [x,y]))
 
-getCondCode other = do dflags <- getDynFlagsNat
+getCondCode other = do dflags <- getDynFlags
                        pprPanic "SPARC.CodeGen.CondCode.getCondCode" (pprPlatform (targetPlatform dflags) other)
 
 

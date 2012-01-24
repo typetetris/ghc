@@ -26,9 +26,11 @@ import TcRnMonad
 import TcHsType
 import TcExpr
 import TcEnv
+import RnEnv
 
 import FamInst
 import FamInstEnv
+import Coercion      
 import Type
 import TypeRep
 import ForeignCall
@@ -39,7 +41,6 @@ import RdrName
 import DataCon
 import TyCon
 import TcType
-import Coercion
 import PrelNames
 import DynFlags
 import Outputable
@@ -47,7 +48,6 @@ import Platform
 import SrcLoc
 import Bag
 import FastString
-import Util
 
 import Control.Monad
 \end{code}
@@ -84,8 +84,9 @@ normaliseFfiType' env ty0 = go [] ty0
     go rec_nts ty@(TyConApp tc tys)
         -- We don't want to look through the IO newtype, even if it is
         -- in scope, so we have a special case for it:
-        | tc `hasKey` ioTyConKey
+        | tc_key `elem` [ioTyConKey, funPtrTyConKey]
         = children_only
+
         | isNewTyCon tc         -- Expand newtypes
         -- We can't just use isRecursiveTyCon here, as we need to allow
         -- some recursive types as described below
@@ -99,23 +100,51 @@ normaliseFfiType' env ty0 = go [] ty0
           else do newtypeOK <- do env <- getGblEnv
                                   case tyConSingleDataCon_maybe tc of
                                       Just dataCon ->
-                                          return $ notNull $ lookupGRE_Name (tcg_rdr_env env) $ dataConName dataCon
+                                          case lookupGRE_Name (tcg_rdr_env env) $ dataConName dataCon of
+                                              [gre] ->
+                                                  do -- If we look through a newtype constructor, then we need it to be in scope.
+                                                     -- But if this is the only use if that import then we'll get an unused import
+                                                     -- warning, so we need to mark a valid RdrName for it as used.
+                                                     case gre_prov gre of
+                                                         Imported (is : _) ->
+                                                             do let modName = is_as (is_decl is)
+                                                                    occName = nameOccName (dataConName dataCon)
+                                                                    rdrName = mkRdrQual modName occName
+                                                                addUsedRdrNames [rdrName]
+                                                         Imported [] ->
+                                                             panic "normaliseFfiType': Imported []"
+                                                         LocalDef ->
+                                                             return ()
+                                                     return True
+                                              [] ->
+                                                  return False
+                                              _ ->
+                                                  panic "normaliseFfiType': Got more GREs than expected"
                                       _ ->
                                           return False
-                  let newtypeForeign = nameModule_maybe (tyConName tc) `elem`
-                                       [Just (mkBaseModule (fsLit "Foreign.C.Types")),
-                                        Just (mkBaseModule (fsLit "System.Posix.Types"))]
-                  if newtypeOK || newtypeForeign
-                      then do let nt_co = mkAxInstCo (newTyConCo tc) tys
-                              add_co nt_co rec_nts' nt_rhs
-                      else children_only
+                  when (not newtypeOK) $
+                     -- later: stop_here
+                    addWarnTc (ptext (sLit "newtype") <+> quotes (ppr tc) <+>
+                               ptext (sLit "is used in an FFI declaration,") $$
+                               ptext (sLit "but its constructor is not in scope.") $$
+                               ptext (sLit "This will become an error in GHC 7.6.1."))
+
+                  let nt_co = mkAxInstCo (newTyConCo tc) tys
+                  add_co nt_co rec_nts' nt_rhs
+
         | isFamilyTyCon tc              -- Expand open tycons
         , (co, ty) <- normaliseTcApp env tc tys
         , not (isReflCo co)
         = add_co co rec_nts ty
+
         | otherwise
-        = children_only
+        = return (mkReflCo ty, ty)
+            -- If we have reached an ordinary (non-newtype) type constructor,
+            -- we are done.  Note that we don't need to normalise the arguments,
+            -- because whether an FFI type is legal or not depends only on
+            -- the top-level type constructor (e.g. "Ptr a" is valid for all a).
         where
+          tc_key = getUnique tc
           children_only = do xs <- mapM (go rec_nts) tys
                              let (cos, tys') = unzip xs
                              return (mkTyConAppCo tc cos, mkTyConApp tc tys')
@@ -200,8 +229,9 @@ tcCheckFIType sig_ty arg_tys res_ty idecl@(CImport cconv _ _ CWrapper) = do
     checkCConv cconv
     case arg_tys of
         [arg1_ty] -> do checkForeignArgs isFFIExternalTy arg1_tys
-                        checkForeignRes nonIOok  False isFFIExportResultTy res1_ty
-                        checkForeignRes mustBeIO False isFFIDynResultTy    res_ty
+                        checkForeignRes nonIOok  checkSafe isFFIExportResultTy res1_ty
+                        checkForeignRes mustBeIO checkSafe isFFIDynResultTy    res_ty
+                                 -- ToDo: Why are res1_ty and res_ty not equal?
                   where
                      (arg1_tys, res1_ty) = tcSplitFunTys arg1_ty
         _ -> addErrTc (illegalForeignTyErr empty sig_ty)
@@ -216,16 +246,14 @@ tcCheckFIType sig_ty arg_tys res_ty idecl@(CImport cconv safety _ (CFunction tar
           check False (illegalForeignTyErr empty sig_ty)
           return idecl
         (arg1_ty:arg_tys) -> do
-          dflags <- getDOpts
+          dflags <- getDynFlags
           check (isFFIDynArgumentTy arg1_ty)
                 (illegalForeignTyErr argument arg1_ty)
           checkForeignArgs (isFFIArgumentTy dflags safety) arg_tys
-          let safe_on = safeLanguageOn dflags
-              ioOK    = if safe_on then mustBeIO else nonIOok
-          checkForeignRes ioOK safe_on (isFFIImportResultTy dflags) res_ty
+          checkForeignRes nonIOok checkSafe (isFFIImportResultTy dflags) res_ty
           return idecl
   | cconv == PrimCallConv = do
-      dflags <- getDOpts
+      dflags <- getDynFlags
       check (xopt Opt_GHCForeignImportPrim dflags)
             (text "Use -XGHCForeignImportPrim to allow `foreign import prim'.")
       checkCg (checkCOrAsmOrLlvmOrDotNetOrInterp)
@@ -234,19 +262,15 @@ tcCheckFIType sig_ty arg_tys res_ty idecl@(CImport cconv safety _ (CFunction tar
             (text "The safe/unsafe annotation should not be used with `foreign import prim'.")
       checkForeignArgs (isFFIPrimArgumentTy dflags) arg_tys
       -- prim import result is more liberal, allows (#,,#)
-      let safe_on = safeLanguageOn dflags
-          ioOK    = if safe_on then mustBeIO else nonIOok
-      checkForeignRes ioOK safe_on (isFFIPrimResultTy dflags) res_ty
+      checkForeignRes nonIOok checkSafe (isFFIPrimResultTy dflags) res_ty
       return idecl
   | otherwise = do              -- Normal foreign import
-      checkCg (checkCOrAsmOrLlvmOrDotNetOrInterp)
+      checkCg checkCOrAsmOrLlvmOrDotNetOrInterp
       checkCConv cconv
       checkCTarget target
-      dflags <- getDOpts
+      dflags <- getDynFlags
       checkForeignArgs (isFFIArgumentTy dflags safety) arg_tys
-      let safe_on = safeLanguageOn dflags
-          ioOK    = if safe_on then mustBeIO else nonIOok
-      checkForeignRes ioOK safe_on (isFFIImportResultTy dflags) res_ty
+      checkForeignRes nonIOok checkSafe (isFFIImportResultTy dflags) res_ty
       checkMissingAmpersand dflags arg_tys res_ty
       return idecl
 
@@ -320,7 +344,7 @@ tcCheckFEType sig_ty (CExport (CExportStatic str cconv)) = do
     check (isCLabelString str) (badCName str)
     checkCConv cconv
     checkForeignArgs isFFIExternalTy arg_tys
-    checkForeignRes nonIOok False isFFIExportResultTy res_ty
+    checkForeignRes nonIOok noCheckSafe isFFIExportResultTy res_ty
   where
       -- Drop the foralls before inspecting n
       -- the structure of the foreign type.
@@ -339,32 +363,56 @@ tcCheckFEType sig_ty (CExport (CExportStatic str cconv)) = do
 \begin{code}
 ------------ Checking argument types for foreign import ----------------------
 checkForeignArgs :: (Type -> Bool) -> [Type] -> TcM ()
-checkForeignArgs pred tys
-  = mapM_ go tys
-  where
-    go ty = check (pred ty) (illegalForeignTyErr argument ty)
+checkForeignArgs pred tys = mapM_ go tys
+  where go ty = check (pred ty) (illegalForeignTyErr argument ty)
 
 ------------ Checking result types for foreign calls ----------------------
--- Check that the type has the form
+-- | Check that the type has the form
 --    (IO t) or (t) , and that t satisfies the given predicate.
+-- When calling this function, any newtype wrappers (should) have been
+-- already dealt with by normaliseFfiType.
+-- 
+-- We also check that the Safe Haskell condition of FFI imports having
+-- results in the IO monad holds.
 --
 checkForeignRes :: Bool -> Bool -> (Type -> Bool) -> Type -> TcM ()
+checkForeignRes non_io_result_ok check_safe pred_res_ty ty
+  = case tcSplitIOType_maybe ty of
+        -- Got an IO result type, that's always fine!
+        Just (_, res_ty) | pred_res_ty res_ty -> return ()
+
+        -- Case for non-IO result type with FFI Import
+        _ -> do
+            dflags <- getDynFlags
+            case (pred_res_ty ty && non_io_result_ok) of
+                -- handle normal typecheck fail, we want to handle this first and
+                -- only report safe haskell errors if the normal type check is OK.
+                False -> addErrTc $ illegalForeignTyErr result ty
+
+                -- handle safe infer fail
+                _ | check_safe && safeInferOn dflags
+                    -> recordUnsafeInfer
+
+                -- handle safe language typecheck fail
+                _ | check_safe && safeLanguageOn dflags
+                    -> addErrTc $ illegalForeignTyErr result ty $+$ safeHsErr
+
+                -- sucess! non-IO return is fine
+                _ -> return ()
+
+  where 
+    safeHsErr = ptext $ sLit "Safe Haskell is on, all FFI imports must be in the IO monad"
 
 nonIOok, mustBeIO :: Bool
 nonIOok  = True
 mustBeIO = False
 
-checkForeignRes non_io_result_ok safehs_check pred_res_ty ty
-    -- We need an (IO t) result. Any newtype wrappers of type functions
-    -- have already been dealt with by normaliseFfiType.
-  = case tcSplitIOType_maybe ty of
-    Just (_, res_ty)
-     | pred_res_ty res_ty ->
-        return ()
-    _ ->
-        check (non_io_result_ok && pred_res_ty ty)
-              (illegalForeignTyErr result ty $+$ safeHsErr safehs_check)
+checkSafe, noCheckSafe :: Bool
+checkSafe   = True
+noCheckSafe = False
 \end{code}
+
+Checking a supported backend is in use
 
 \begin{code}
 checkCOrAsmOrLlvm :: HscTarget -> Maybe SDoc
@@ -392,7 +440,7 @@ checkCOrAsmOrLlvmOrDotNetOrInterp _
 
 checkCg :: (HscTarget -> Maybe SDoc) -> TcM ()
 checkCg check = do
-    dflags <- getDOpts
+    dflags <- getDynFlags
     let target = hscTarget dflags
     case target of
       HscNothing -> return ()
@@ -407,7 +455,8 @@ Calling conventions
 \begin{code}
 checkCConv :: CCallConv -> TcM ()
 checkCConv CCallConv    = return ()
-checkCConv StdCallConv  = do dflags <- getDOpts
+checkCConv CApiConv     = return ()
+checkCConv StdCallConv  = do dflags <- getDynFlags
                              let platform = targetPlatform dflags
                              unless (platformArch platform == ArchX86) $
                                  -- This is a warning, not an error. see #3336
@@ -419,7 +468,7 @@ checkCConv CmmCallConv  = panic "checkCConv CmmCallConv"
 Warnings
 
 \begin{code}
-check :: Bool -> Message -> TcM ()
+check :: Bool -> MsgDoc -> TcM ()
 check True _       = return ()
 check _    the_err = addErrTc the_err
 
@@ -429,16 +478,12 @@ illegalForeignTyErr arg_or_res ty
                 ptext (sLit "type in foreign declaration:")])
        2 (hsep [ppr ty])
 
-safeHsErr :: Bool -> SDoc
-safeHsErr False = empty
-safeHsErr True  = ptext $ sLit "Safe Haskell is on, all FFI imports must be in the IO monad"
-
 -- Used for 'arg_or_res' argument to illegalForeignTyErr
 argument, result :: SDoc
 argument = text "argument"
 result   = text "result"
 
-badCName :: CLabelString -> Message
+badCName :: CLabelString -> MsgDoc
 badCName target
   = sep [quotes (ppr target) <+> ptext (sLit "is not a valid C identifier")]
 

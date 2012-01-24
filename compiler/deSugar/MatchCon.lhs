@@ -6,6 +6,13 @@
 Pattern-matching constructors
 
 \begin{code}
+{-# OPTIONS -fno-warn-tabs #-}
+-- The above warning supression flag is a temporary kludge.
+-- While working on this module you are encouraged to remove it and
+-- detab the module (please do the detabbing in a separate patch). See
+--     http://hackage.haskell.org/trac/ghc/wiki/Commentary/CodingStyle#TabsvsSpaces
+-- for details
+
 module MatchCon ( matchConFamily ) where
 
 #include "HsVersions.h"
@@ -124,19 +131,18 @@ matchOneCon vars ty (eqn1 : eqns)	-- All eqns for a single constructor
     match_group :: [Id] -> [(ConArgPats, EquationInfo)] -> DsM MatchResult
     -- All members of the group have compatible ConArgPats
     match_group arg_vars arg_eqn_prs
-      = do { (wraps, eqns') <- mapAndUnzipM shift arg_eqn_prs
-    	   ; let group_arg_vars = select_arg_vars arg_vars arg_eqn_prs
+      = do { let (wraps, eqns') = unzip (map shift arg_eqn_prs)
+    	         group_arg_vars = select_arg_vars arg_vars arg_eqn_prs
     	   ; match_result <- match (group_arg_vars ++ vars) ty eqns'
     	   ; return (adjustMatchResult (foldr1 (.) wraps) match_result) }
 
     shift (_, eqn@(EqnInfo { eqn_pats = ConPatOut{ pat_tvs = tvs, pat_dicts = ds, 
 					           pat_binds = bind, pat_args = args
 					} : pats }))
-      = do { ds_ev_binds <- dsTcEvBinds bind
-	   ; return (wrapBinds (tvs `zip` tvs1) 
-		    . wrapBinds (ds  `zip` dicts1)
-		    . mkCoreLets ds_ev_binds,
-		    eqn { eqn_pats = conArgPats arg_tys args ++ pats }) }
+      = ( wrapBinds (tvs `zip` tvs1) 
+	  . wrapBinds (ds  `zip` dicts1)
+	  . mkCoreLets (dsTcEvBinds bind)
+	, eqn { eqn_pats = conArgPats arg_tys args ++ pats }) 
     shift (_, (EqnInfo { eqn_pats = ps })) = pprPanic "matchOneCon/shift" (ppr ps)
 
     -- Choose the right arg_vars in the right order for this group

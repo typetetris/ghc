@@ -23,12 +23,15 @@ import DataCon
 import TyCon
 import TypeRep
 import Type
+import PrelNames
 import Digraph
 
 
--- |From a list of type constructors, extract those thatcan be vectorised, returning them in two
+-- |From a list of type constructors, extract those that can be vectorised, returning them in two
 -- sets, where the first result list /must be/ vectorised and the second result list /need not be/
--- vectroised.
+-- vectorised.  The third result list are those type constructors that we cannot convert (either
+-- because they use language extensions or because they dependent on type constructors for which
+-- no vectorised version is available).
 
 -- The first argument determines the /conversion status/ of external type constructors as follows:
 --
@@ -36,26 +39,37 @@ import Digraph
 -- * tycons which are not changed by vectorisation are mapped to 'False'
 -- * tycons which can't be converted are not elements of the map
 --
-classifyTyCons :: UniqFM Bool             -- ^type constructor conversion status
-               -> [TyCon]                 -- ^type constructors that need to be classified
-               -> ([TyCon], [TyCon])      -- ^tycons to be converted & not to be converted
-classifyTyCons convStatus tcs = classify [] [] convStatus (tyConGroups tcs)
+classifyTyCons :: UniqFM Bool                     -- ^type constructor conversion status
+               -> [TyCon]                         -- ^type constructors that need to be classified
+               -> ([TyCon], [TyCon], [TyCon])     -- ^tycons to be converted & not to be converted
+classifyTyCons convStatus tcs = classify [] [] [] convStatus (tyConGroups tcs)
   where
-    classify conv keep _  [] = (conv, keep)
-    classify conv keep cs ((tcs, ds) : rs)
+    classify conv keep ignored _  [] = (conv, keep, ignored)
+    classify conv keep ignored cs ((tcs, ds) : rs)
       | can_convert && must_convert
-      = classify (tcs ++ conv) keep (cs `addListToUFM` [(tc, True) | tc <- tcs]) rs
+      = classify (tcs ++ conv) keep ignored (cs `addListToUFM` [(tc, True) | tc <- tcs]) rs
       | can_convert
-      = classify conv (tcs ++ keep) (cs `addListToUFM` [(tc, False) | tc <- tcs]) rs
+      = classify conv (tcs ++ keep) ignored (cs `addListToUFM` [(tc, False) | tc <- tcs]) rs
       | otherwise
-      = classify conv keep cs rs
+      = classify conv keep (tcs ++ ignored) cs rs
       where
         refs = ds `delListFromUniqSet` tcs
 
-        can_convert  = isNullUFM (refs `minusUFM` cs) && all convertable tcs
+        can_convert  = (isNullUFM (refs `minusUFM` cs) && all convertable tcs)
+                       || isShowClass tcs
         must_convert = foldUFM (||) False (intersectUFM_C const cs refs)
+                       && (not . isShowClass $ tcs)
 
-        convertable tc = isDataTyCon tc && all isVanillaDataCon (tyConDataCons tc)
+        -- We currently admit Haskell 2011-style data and newtype declarations as well as type
+        -- constructors representing classes.
+        convertable tc 
+          = (isDataTyCon tc || isNewTyCon tc) && all isVanillaDataCon (tyConDataCons tc)
+            || isClassTyCon tc
+            
+        -- !!!FIXME: currently we allow 'Show' in vectorised code without actually providing a
+        --   vectorised definition (to be able to vectorise 'Num')
+        isShowClass [tc] = tyConName tc == showClassName
+        isShowClass _    = False
 
 -- Used to group type constructors into mutually dependent groups.
 --

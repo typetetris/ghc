@@ -6,6 +6,13 @@
 This module converts Template Haskell syntax into HsSyn
 
 \begin{code}
+{-# OPTIONS -fno-warn-tabs #-}
+-- The above warning supression flag is a temporary kludge.
+-- While working on this module you are encouraged to remove it and
+-- detab the module (please do the detabbing in a separate patch). See
+--     http://hackage.haskell.org/trac/ghc/wiki/Commentary/CodingStyle#TabsvsSpaces
+-- for details
+
 module Convert( convertToHsExpr, convertToPat, convertToHsDecls,
                 convertToHsType,
                 thRdrNameGuesses ) where
@@ -20,7 +27,6 @@ import qualified OccName
 import OccName
 import SrcLoc
 import Type
-import Coercion
 import TysWiredIn
 import BasicTypes as Hs
 import ForeignCall
@@ -42,25 +48,25 @@ import GHC.Exts
 -------------------------------------------------------------------
 --		The external interface
 
-convertToHsDecls :: SrcSpan -> [TH.Dec] -> Either Message [LHsDecl RdrName]
+convertToHsDecls :: SrcSpan -> [TH.Dec] -> Either MsgDoc [LHsDecl RdrName]
 convertToHsDecls loc ds = initCvt loc (mapM cvt_dec ds)
   where
     cvt_dec d = wrapMsg "declaration" d (cvtDec d)
 
-convertToHsExpr :: SrcSpan -> TH.Exp -> Either Message (LHsExpr RdrName)
+convertToHsExpr :: SrcSpan -> TH.Exp -> Either MsgDoc (LHsExpr RdrName)
 convertToHsExpr loc e 
   = initCvt loc $ wrapMsg "expression" e $ cvtl e
 
-convertToPat :: SrcSpan -> TH.Pat -> Either Message (LPat RdrName)
+convertToPat :: SrcSpan -> TH.Pat -> Either MsgDoc (LPat RdrName)
 convertToPat loc p
   = initCvt loc $ wrapMsg "pattern" p $ cvtPat p
 
-convertToHsType :: SrcSpan -> TH.Type -> Either Message (LHsType RdrName)
+convertToHsType :: SrcSpan -> TH.Type -> Either MsgDoc (LHsType RdrName)
 convertToHsType loc t
   = initCvt loc $ wrapMsg "type" t $ cvtType t
 
 -------------------------------------------------------------------
-newtype CvtM a = CvtM { unCvtM :: SrcSpan -> Either Message a }
+newtype CvtM a = CvtM { unCvtM :: SrcSpan -> Either MsgDoc a }
 	-- Push down the source location;
 	-- Can fail, with a single error message
 
@@ -79,13 +85,13 @@ instance Monad CvtM where
 				    Left err -> Left err
 				    Right v  -> unCvtM (k v) loc
 
-initCvt :: SrcSpan -> CvtM a -> Either Message a
+initCvt :: SrcSpan -> CvtM a -> Either MsgDoc a
 initCvt loc (CvtM m) = m loc
 
 force :: a -> CvtM ()
 force a = a `seq` return ()
 
-failWith :: Message -> CvtM a
+failWith :: MsgDoc -> CvtM a
 failWith m = CvtM (\_ -> Left m)
 
 getL :: CvtM SrcSpan
@@ -130,7 +136,8 @@ cvtDec (TH.ValD pat body ds)
 	; ds' <- cvtLocalDecs (ptext (sLit "a where clause")) ds
 	; returnL $ Hs.ValD $
           PatBind { pat_lhs = pat', pat_rhs = GRHSs body' ds' 
-		  , pat_rhs_ty = void, bind_fvs = placeHolderNames } }
+                  , pat_rhs_ty = void, bind_fvs = placeHolderNames
+                  , pat_ticks = (Nothing,[]) } }
 
 cvtDec (TH.FunD nm cls)   
   | null cls
@@ -196,7 +203,7 @@ cvtDec (ForeignD ford)
 
 cvtDec (FamilyD flav tc tvs kind)
   = do { (_, tc', tvs') <- cvt_tycl_hdr [] tc tvs
-       ; let kind' = fmap cvtKind kind
+       ; kind' <- cvtMaybeKind kind
        ; returnL $ TyClD (TyFamily (cvtFamFlavour flav) tc' tvs' kind') }
   where
     cvtFamFlavour TypeFam = TypeFamily
@@ -225,7 +232,7 @@ cvtDec (TySynInstD tc tys rhs)
 	; returnL $ TyClD (TySynonym tc' tvs' tys' rhs') }
 
 ----------------
-cvt_ci_decs :: Message -> [TH.Dec]
+cvt_ci_decs :: MsgDoc -> [TH.Dec]
             -> CvtM (LHsBinds RdrName, 
                      [LSig RdrName], 
                      [LTyClDecl RdrName])
@@ -297,7 +304,7 @@ is_bind :: LHsDecl RdrName -> Either (LHsBind RdrName) (LHsDecl RdrName)
 is_bind (L loc (Hs.ValD bind)) = Left (L loc bind)
 is_bind decl		       = Right decl
 
-mkBadDecMsg :: Message -> [LHsDecl RdrName] -> Message
+mkBadDecMsg :: MsgDoc -> [LHsDecl RdrName] -> MsgDoc
 mkBadDecMsg doc bads 
   = sep [ ptext (sLit "Illegal declaration(s) in") <+> doc <> colon
         , nest 2 (vcat (map Outputable.ppr bads)) ]
@@ -430,7 +437,7 @@ cvtInlineSpec (Just (TH.InlineSpec inline conlike opt_activation))
 --		Declarations
 ---------------------------------------------------
 
-cvtLocalDecs :: Message -> [TH.Dec] -> CvtM (HsLocalBinds RdrName)
+cvtLocalDecs :: MsgDoc -> [TH.Dec] -> CvtM (HsLocalBinds RdrName)
 cvtLocalDecs doc ds 
   | null ds
   = return EmptyLocalBinds
@@ -777,7 +784,8 @@ cvt_tv (TH.PlainTV nm)
        }
 cvt_tv (TH.KindedTV nm ki) 
   = do { nm' <- tName nm
-       ; returnL $ KindedTyVar nm' (cvtKind ki)
+       ; ki' <- cvtKind ki
+       ; returnL $ KindedTyVar nm' ki' placeHolderKind
        }
 
 cvtContext :: TH.Cxt -> CvtM (LHsContext RdrName)
@@ -803,7 +811,7 @@ cvtType ty
              | length tys' == n 	-- Saturated
              -> if n==1 then return (head tys')	-- Singleton tuples treated 
                                                 -- like nothing (ie just parens)
-                        else returnL (HsTupleTy (HsBoxyTuple liftedTypeKind) tys')
+                        else returnL (HsTupleTy HsBoxedTuple tys')
              | n == 1    
              -> failWith (ptext (sLit "Illegal 1-tuple type constructor"))
              | otherwise 
@@ -834,7 +842,8 @@ cvtType ty
 
            SigT ty ki
              -> do { ty' <- cvtType ty
-                   ; mk_apps (HsKindSig ty' (cvtKind ki)) tys'
+                   ; ki' <- cvtKind ki
+                   ; mk_apps (HsKindSig ty' ki') tys'
                    }
 
            _ -> failWith (ptext (sLit "Malformed type") <+> text (show ty))
@@ -851,9 +860,16 @@ split_ty_app ty = go ty []
     go (AppT f a) as' = do { a' <- cvtType a; go f (a':as') }
     go f as 	      = return (f,as)
 
-cvtKind :: TH.Kind -> Type.Kind
-cvtKind StarK          = liftedTypeKind
-cvtKind (ArrowK k1 k2) = mkArrowKind (cvtKind k1) (cvtKind k2)
+cvtKind :: TH.Kind -> CvtM (LHsKind RdrName)
+cvtKind StarK          = returnL (HsTyVar (getRdrName liftedTypeKindTyCon))
+cvtKind (ArrowK k1 k2) = do
+  k1' <- cvtKind k1
+  k2' <- cvtKind k2
+  returnL (HsFunTy k1' k2')
+
+cvtMaybeKind :: Maybe TH.Kind -> CvtM (Maybe (LHsKind RdrName))
+cvtMaybeKind Nothing = return Nothing
+cvtMaybeKind (Just ki) = cvtKind ki >>= return . Just
 
 -----------------------------------------------------------
 

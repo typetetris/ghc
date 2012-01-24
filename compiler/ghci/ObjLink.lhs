@@ -9,6 +9,13 @@
 Primarily, this module consists of an interface to the C-land dynamic linker.
 
 \begin{code}
+{-# OPTIONS -fno-warn-tabs #-}
+-- The above warning supression flag is a temporary kludge.
+-- While working on this module you are encouraged to remove it and
+-- detab the module (please do the detabbing in a separate patch). See
+--     http://hackage.haskell.org/trac/ghc/wiki/Commentary/CodingStyle#TabsvsSpaces
+-- for details
+
 module ObjLink ( 
    initObjLinker,	 -- :: IO ()
    loadDLL,		 -- :: String -> IO (Maybe String)
@@ -29,8 +36,7 @@ import Control.Monad    ( when )
 import Foreign.C
 import Foreign		( nullPtr )
 import GHC.Exts         ( Ptr(..) )
-import GHC.IO.Encoding  ( fileSystemEncoding )
-import qualified GHC.Foreign as GHC
+import System.Posix.Internals ( CFilePath, withFilePath )
 import System.FilePath  ( dropExtension )
 
 
@@ -38,14 +44,10 @@ import System.FilePath  ( dropExtension )
 -- RTS Linker Interface
 -- ---------------------------------------------------------------------------
 
--- UNICODE FIXME: Unicode object/archive/DLL file names on Windows will only work in the right code page
-withFileCString :: FilePath -> (CString -> IO a) -> IO a
-withFileCString = GHC.withCString fileSystemEncoding
-
 insertSymbol :: String -> String -> Ptr a -> IO ()
 insertSymbol obj_name key symbol
     = let str = prefixUnderscore key
-      in withFileCString obj_name $ \c_obj_name ->
+      in withFilePath obj_name $ \c_obj_name ->
          withCAString str $ \c_str ->
           c_insertSymbol c_obj_name c_str symbol
 
@@ -81,7 +83,7 @@ loadDLL str0 = do
      str | isWindowsHost = dropExtension str0
          | otherwise     = str0
   --
-  maybe_errmsg <- withFileCString str $ \dll -> c_addDLL dll
+  maybe_errmsg <- withFilePath str $ \dll -> c_addDLL dll
   if maybe_errmsg == nullPtr
 	then return Nothing
 	else do str <- peekCString maybe_errmsg
@@ -89,19 +91,19 @@ loadDLL str0 = do
 
 loadArchive :: String -> IO ()
 loadArchive str = do
-   withFileCString str $ \c_str -> do
+   withFilePath str $ \c_str -> do
      r <- c_loadArchive c_str
      when (r == 0) (panic ("loadArchive " ++ show str ++ ": failed"))
 
 loadObj :: String -> IO ()
 loadObj str = do
-   withFileCString str $ \c_str -> do
+   withFilePath str $ \c_str -> do
      r <- c_loadObj c_str
      when (r == 0) (panic ("loadObj " ++ show str ++ ": failed"))
 
 unloadObj :: String -> IO ()
 unloadObj str =
-   withFileCString str $ \c_str -> do
+   withFilePath str $ \c_str -> do
      r <- c_unloadObj c_str
      when (r == 0) (panic ("unloadObj " ++ show str ++ ": failed"))
 
@@ -114,12 +116,12 @@ resolveObjs = do
 -- Foreign declarations to RTS entry points which does the real work;
 -- ---------------------------------------------------------------------------
 
-foreign import ccall unsafe "addDLL"	   c_addDLL :: CString -> IO CString
+foreign import ccall unsafe "addDLL"       c_addDLL :: CFilePath -> IO CString
 foreign import ccall unsafe "initLinker"   initObjLinker :: IO ()
-foreign import ccall unsafe "insertSymbol" c_insertSymbol :: CString -> CString -> Ptr a -> IO ()
+foreign import ccall unsafe "insertSymbol" c_insertSymbol :: CFilePath -> CString -> Ptr a -> IO ()
 foreign import ccall unsafe "lookupSymbol" c_lookupSymbol :: CString -> IO (Ptr a)
-foreign import ccall unsafe "loadArchive"  c_loadArchive :: CString -> IO Int
-foreign import ccall unsafe "loadObj"      c_loadObj :: CString -> IO Int
-foreign import ccall unsafe "unloadObj"    c_unloadObj :: CString -> IO Int
+foreign import ccall unsafe "loadArchive"  c_loadArchive :: CFilePath -> IO Int
+foreign import ccall unsafe "loadObj"      c_loadObj :: CFilePath -> IO Int
+foreign import ccall unsafe "unloadObj"    c_unloadObj :: CFilePath -> IO Int
 foreign import ccall unsafe "resolveObjs"  c_resolveObjs :: IO Int
 \end{code}

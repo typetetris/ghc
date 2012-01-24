@@ -1,12 +1,11 @@
-
 module Vectorise.Utils.PADict (
-	paDictArgType,
-	paDictOfType,
-	paMethod,
-        prDictOfReprType,
-        prDictOfPReprInstTyCon
-)
-where
+  paDictArgType,
+  paDictOfType,
+  paMethod,
+  prDictOfReprType,
+  prDictOfPReprInstTyCon
+) where
+
 import Vectorise.Monad
 import Vectorise.Builtins
 import Vectorise.Utils.Base
@@ -23,7 +22,7 @@ import FastString
 import Control.Monad
 
 
--- | Construct the PA argument type for the tyvar. For the tyvar (v :: *) it's
+-- |Construct the PA argument type for the tyvar. For the tyvar (v :: *) it's
 -- just PA v. For (v :: (* -> *) -> *) it's
 --
 -- > forall (a :: * -> *). (forall (b :: *). PA b -> PA (a b)) -> PA (v a)
@@ -50,7 +49,7 @@ paDictArgType tv = go (TyVarTy tv) (tyVarKind tv)
     go _ _ = return Nothing
 
 
--- | Get the PA dictionary for some type
+-- |Get the PA dictionary for some type
 --
 paDictOfType :: Type -> VM CoreExpr
 paDictOfType ty 
@@ -76,23 +75,23 @@ paDictOfType ty
     -- the representation type if the tycon is polymorphic
     paDictOfTyApp (TyConApp tc []) ty_args
      = do
-         dfun <- maybeCantVectoriseM "No PA dictionary for type constructor"
-                                      (ppr tc <+> text "in" <+> ppr ty)
+         dfun <- maybeCantVectoriseM noPADictErr (ppr tc <+> text "in" <+> ppr ty)
                 $ lookupTyConPA tc
          dicts <- mapM paDictOfType ty_args
          return $ Var dfun `mkTyApps` ty_args `mkApps` dicts
+     where
+       noPADictErr = "No PA dictionary for type constructor (did you import 'Data.Array.Parallel'?)"
 
     paDictOfTyApp _ _ = failure
 
     failure = cantVectorise "Can't construct PA dictionary for type" (ppr ty)
 
-paMethod :: (Builtins -> Var) -> String -> Type -> VM CoreExpr
-paMethod _ name ty
-  | Just tycon <- splitPrimTyCon ty
-  = liftM Var
-  . maybeCantVectoriseM "No PA method" (text name <+> text "for" <+> ppr tycon)
-  $ lookupPrimMethod tycon name
-
+-- |Produce code that refers to a method of the 'PA' class.
+--
+paMethod :: (Builtins -> Var) -> (TyCon -> Builtins -> Var) -> Type -> VM CoreExpr
+paMethod _ query ty
+  | Just tycon <- splitPrimTyCon ty             -- Is 'ty' from 'GHC.Prim' (e.g., 'Int#')?
+  = liftM Var $ builtin (query tycon)
 paMethod method _ ty
   = do
       fn   <- builtin method
@@ -114,19 +113,16 @@ paMethod method _ ty
 --
 -- Note that @ty@ is only used for error messages
 --
-prDictOfPReprInstTyCon :: Type -> TyCon -> [Type] -> VM CoreExpr
-prDictOfPReprInstTyCon ty prepr_tc prepr_args
-  | Just rhs <- coreView (mkTyConApp prepr_tc prepr_args)
+prDictOfPReprInstTyCon :: Type -> CoAxiom -> [Type] -> VM CoreExpr
+prDictOfPReprInstTyCon _ty prepr_ax prepr_args
   = do
+      let rhs = mkAxInstRHS prepr_ax prepr_args
       dict <- prDictOfReprType' rhs
       pr_co <- mkBuiltinCo prTyCon
-      let Just arg_co = tyConFamilyCoercion_maybe prepr_tc
       let co = mkAppCo pr_co
              $ mkSymCo
-             $ mkAxInstCo arg_co prepr_args
-      return $ mkCoerce co dict
-
-  | otherwise = cantVectorise "Invalid PRepr type instance" (ppr ty)
+             $ mkAxInstCo prepr_ax prepr_args
+      return $ mkCast dict co
 
 -- |Get the PR dictionary for a type. The argument must be a representation
 -- type.

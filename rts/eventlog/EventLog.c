@@ -62,6 +62,7 @@ char *EventDesc[] = {
   [EVENT_MIGRATE_THREAD]      = "Migrate thread",
   [EVENT_SHUTDOWN]            = "Shutdown",
   [EVENT_THREAD_WAKEUP]       = "Wakeup thread",
+  [EVENT_THREAD_LABEL]        = "Thread label",
   [EVENT_GC_START]            = "Starting GC",
   [EVENT_GC_END]              = "Finished GC",
   [EVENT_REQUEST_SEQ_GC]      = "Request sequential GC",
@@ -83,6 +84,7 @@ char *EventDesc[] = {
   [EVENT_PROGRAM_ENV]         = "Program environment variables",
   [EVENT_OSPROCESS_PID]       = "Process ID",
   [EVENT_OSPROCESS_PPID]      = "Parent process ID",
+  [EVENT_WALL_CLOCK_TIME]     = "Wall clock time",
   [EVENT_SPARK_COUNTERS]      = "Spark counters",
   [EVENT_SPARK_CREATE]        = "Spark create",
   [EVENT_SPARK_DUD]           = "Spark dud",
@@ -147,7 +149,7 @@ static inline void postBuf(EventsBuf *eb, StgWord8 *buf, nat size)
 }
 
 static inline StgWord64 time_ns(void)
-{ return stat_getElapsedTime() * (1000000000LL/TICKS_PER_SECOND); }
+{ return TimeToNS(stat_getElapsedTime()); }
 
 static inline void postEventTypeNum(EventsBuf *eb, EventTypeNum etNum)
 { postWord16(eb, etNum); }
@@ -194,8 +196,22 @@ initEventLogging(void)
 {
     StgWord8 t, c;
     nat n_caps;
+    char *prog;
 
-    event_log_filename = stgMallocBytes(strlen(prog_name)
+    prog = stgMallocBytes(strlen(prog_name) + 1, "initEventLogging");
+    strcpy(prog, prog_name);
+#ifdef mingw32_HOST_OS
+    // on Windows, drop the .exe suffix if there is one
+    {
+        char *suff;
+        suff = strrchr(prog,'.');
+        if (suff != NULL && !strcmp(suff,".exe")) {
+            *suff = '\0';
+        }
+    }
+#endif
+
+    event_log_filename = stgMallocBytes(strlen(prog)
                                         + 10 /* .%d */
                                         + 10 /* .eventlog */,
                                         "initEventLogging");
@@ -206,14 +222,15 @@ initEventLogging(void)
 
     if (event_log_pid == -1) { // #4512
         // Single process
-        sprintf(event_log_filename, "%s.eventlog", prog_name);
+        sprintf(event_log_filename, "%s.eventlog", prog);
         event_log_pid = getpid();
     } else {
         // Forked process, eventlog already started by the parent
         // before fork
         event_log_pid = getpid();
-        sprintf(event_log_filename, "%s.%d.eventlog", prog_name, event_log_pid);
+        sprintf(event_log_filename, "%s.%d.eventlog", prog, event_log_pid);
     }
+    stgFree(prog);
 
     /* Open event log file for writing. */
     if ((event_log_file = fopen(event_log_filename, "wb")) == NULL) {
@@ -237,12 +254,8 @@ initEventLogging(void)
 #else
     n_caps = 1;
 #endif
-    capEventBuf = stgMallocBytes(n_caps * sizeof(EventsBuf),"initEventLogging");
+    moreCapEventBufs(0,n_caps);
 
-    for (c = 0; c < n_caps; ++c) {
-        // Init buffer for events.
-        initEventsBuf(&capEventBuf[c], EVENT_LOG_SIZE, c);
-    }
     initEventsBuf(&eventBuf, EVENT_LOG_SIZE, (EventCapNo)(-1));
 
     // Write in buffer: the header begin marker.
@@ -299,6 +312,11 @@ initEventLogging(void)
                 sizeof(EventCapsetID) + sizeof(StgWord32);
             break;
 
+        case EVENT_WALL_CLOCK_TIME: // (capset, unix_epoch_seconds, nanoseconds)
+            eventTypes[t].size =
+                sizeof(EventCapsetID) + sizeof(StgWord64) + sizeof(StgWord32);
+            break;
+
         case EVENT_SPARK_STEAL:     // (cap, victim_cap)
             eventTypes[t].size =
                 sizeof(EventCapNo);
@@ -326,6 +344,7 @@ initEventLogging(void)
         case EVENT_RTS_IDENTIFIER:   // (capset, str)
         case EVENT_PROGRAM_ARGS:     // (capset, strvec)
         case EVENT_PROGRAM_ENV:      // (capset, strvec)
+        case EVENT_THREAD_LABEL:     // (thread, str)
             eventTypes[t].size = 0xffff;
             break;
 
@@ -394,7 +413,26 @@ endEventLogging(void)
     }
 }
 
-void 
+void
+moreCapEventBufs (nat from, nat to)
+{
+    nat c;
+
+    if (from > 0) {
+        capEventBuf = stgReallocBytes(capEventBuf, to * sizeof(EventsBuf),
+                                      "moreCapEventBufs");
+    } else {
+        capEventBuf = stgMallocBytes(to * sizeof(EventsBuf),
+                                     "moreCapEventBufs");
+    }
+
+    for (c = from; c < to; ++c) {
+        initEventsBuf(&capEventBuf[c], EVENT_LOG_SIZE, c);
+    }
+}
+
+
+void
 freeEventLogging(void)
 {
     StgWord8 c;
@@ -559,9 +597,9 @@ postSparkCountersEvent (Capability *cap,
     postWord64(eb,remaining);
 }
 
-void postCapsetModifyEvent (EventTypeNum tag,
-                            EventCapsetID capset,
-                            StgWord32 other)
+void postCapsetEvent (EventTypeNum tag,
+                      EventCapsetID capset,
+                      StgWord info)
 {
     ACQUIRE_LOCK(&eventBufMutex);
 
@@ -576,7 +614,7 @@ void postCapsetModifyEvent (EventTypeNum tag,
     switch (tag) {
     case EVENT_CAPSET_CREATE:   // (capset, capset_type)
     {
-        postCapsetType(&eventBuf, other /* capset_type */);
+        postCapsetType(&eventBuf, info /* capset_type */);
         break;
     }
 
@@ -588,17 +626,17 @@ void postCapsetModifyEvent (EventTypeNum tag,
     case EVENT_CAPSET_ASSIGN_CAP:  // (capset, capno)
     case EVENT_CAPSET_REMOVE_CAP:  // (capset, capno)
     {
-        postCapNo(&eventBuf, other /* capno */);
+        postCapNo(&eventBuf, info /* capno */);
         break;
     }
     case EVENT_OSPROCESS_PID:   // (capset, pid)
     case EVENT_OSPROCESS_PPID:  // (capset, parent_pid)
     {
-        postWord32(&eventBuf, other);
+        postWord32(&eventBuf, info);
         break;
     }
     default:
-        barf("postCapsetModifyEvent: unknown event tag %d", tag);
+        barf("postCapsetEvent: unknown event tag %d", tag);
     }
 
     RELEASE_LOCK(&eventBufMutex);
@@ -664,6 +702,52 @@ void postCapsetVecEvent (EventTypeNum tag,
         // again, 1 + to account for \0
         postBuf(&eventBuf, (StgWord8*) argv[i], 1 + strlen(argv[i]));
     }
+
+    RELEASE_LOCK(&eventBufMutex);
+}
+
+void postWallClockTime (EventCapsetID capset)
+{
+    StgWord64 ts;
+    StgWord64 sec;
+    StgWord32 nsec;
+
+    ACQUIRE_LOCK(&eventBufMutex);
+    
+    /* The EVENT_WALL_CLOCK_TIME event is intended to allow programs
+       reading the eventlog to match up the event timestamps with wall
+       clock time. The normal event timestamps measure time since the
+       start of the program. To align eventlogs from concurrent
+       processes we need to be able to match up the timestamps. One way
+       to do this is if we know how the timestamps and wall clock time
+       match up (and of course if both processes have sufficiently
+       synchronised clocks).
+
+       So we want to make sure that the timestamp that we generate for
+       this event matches up very closely with the wall clock time.
+       Unfortunately we currently have to use two different APIs to get
+       the elapsed time vs the wall clock time. So to minimise the
+       difference we just call them very close together.
+     */
+    
+    getUnixEpochTime(&sec, &nsec);  /* Get the wall clock time */
+    ts = time_ns();                 /* Get the eventlog timestamp */
+
+    if (!hasRoomForEvent(&eventBuf, EVENT_WALL_CLOCK_TIME)) {
+        // Flush event buffer to make room for new event.
+        printAndClearEventBuf(&eventBuf);
+    }
+
+    /* Normally we'd call postEventHeader(), but that generates its own
+       timestamp, so we go one level lower so we can write out the
+       timestamp we already generated above. */
+    postEventTypeNum(&eventBuf, EVENT_WALL_CLOCK_TIME);
+    postWord64(&eventBuf, ts);
+    
+    /* EVENT_WALL_CLOCK_TIME (capset, unix_epoch_seconds, nanoseconds) */
+    postCapsetID(&eventBuf, capset);
+    postWord64(&eventBuf, sec);
+    postWord32(&eventBuf, nsec);
 
     RELEASE_LOCK(&eventBufMutex);
 }
@@ -737,6 +821,31 @@ void postEventStartup(EventCapNo n_caps)
     postCapNo(&eventBuf, n_caps);
 
     RELEASE_LOCK(&eventBufMutex);
+}
+
+void postThreadLabel(Capability    *cap,
+                     EventThreadID  id,
+                     char          *label)
+{
+    EventsBuf *eb;
+    int strsize = strlen(label);
+    int size = strsize + sizeof(EventCapsetID);
+
+    eb = &capEventBuf[cap->no];
+
+    if (!hasRoomForVariableEvent(eb, size)){
+        printAndClearEventBuf(eb);
+
+        if (!hasRoomForVariableEvent(eb, size)){
+            // Event size exceeds buffer size, bail out:
+            return;
+        }
+    }
+
+    postEventHeader(eb, EVENT_THREAD_LABEL);
+    postPayloadSize(eb, size);
+    postThreadID(eb, id);
+    postBuf(eb, (StgWord8*) label, strsize);
 }
 
 void closeBlockMarker (EventsBuf *ebuf)

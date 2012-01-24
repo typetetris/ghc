@@ -3,6 +3,13 @@
 % (c) The GRASP/AQUA Project, Glasgow University, 1992-1998
 %
 \begin{code}
+{-# OPTIONS -fno-warn-tabs #-}
+-- The above warning supression flag is a temporary kludge.
+-- While working on this module you are encouraged to remove it and
+-- detab the module (please do the detabbing in a separate patch). See
+--     http://hackage.haskell.org/trac/ghc/wiki/Commentary/CodingStyle#TabsvsSpaces
+-- for details
+
 {-# LANGUAGE DeriveDataTypeable, ScopedTypeVariables #-}
 
 -- | Abstract Haskell syntax for expressions.
@@ -18,6 +25,8 @@ import HsTypes
 import HsBinds
 
 -- others:
+import TcEvidence
+import CoreSyn
 import Var
 import Name
 import BasicTypes
@@ -248,8 +257,7 @@ data HsExpr id
   -- Haskell program coverage (Hpc) Support
 
   | HsTick
-     Int                                -- module-local tick number
-     [id]                               -- variables in scope
+     (Tickish id)
      (LHsExpr id)                       -- sub-expression
 
   | HsBinTick
@@ -298,6 +306,7 @@ tupArgPresent (Missing {}) = False
 
 type PendingSplice = (Name, LHsExpr Id) -- Typechecked splices, waiting to be
                                         -- pasted back in by the desugarer
+
 \end{code}
 
 Note [Parens in HsSyn]
@@ -370,7 +379,7 @@ ppr_lexpr :: OutputableBndr id => LHsExpr id -> SDoc
 ppr_lexpr e = ppr_expr (unLoc e)
 
 ppr_expr :: forall id. OutputableBndr id => HsExpr id -> SDoc
-ppr_expr (HsVar v)       = pprHsVar v
+ppr_expr (HsVar v)       = pprPrefixOcc v
 ppr_expr (HsIPVar v)     = ppr v
 ppr_expr (HsLit lit)     = ppr lit
 ppr_expr (HsOverLit lit) = ppr lit
@@ -398,7 +407,7 @@ ppr_expr (OpApp e1 op _ e2)
       = hang (ppr op) 2 (sep [pp_e1, pp_e2])
 
     pp_infixly v
-      = sep [pp_e1, sep [pprHsInfix v, nest 2 pp_e2]]
+      = sep [pp_e1, sep [pprInfixOcc v, nest 2 pp_e2]]
 
 ppr_expr (NegApp e _) = char '-' <+> pprDebugParendExpr e
 
@@ -411,7 +420,7 @@ ppr_expr (SectionL expr op)
 
     pp_prefixly = hang (hsep [text " \\ x_ ->", ppr op])
                        4 (hsep [pp_expr, ptext (sLit "x_ )")])
-    pp_infixly v = (sep [pp_expr, pprHsInfix v])
+    pp_infixly v = (sep [pp_expr, pprInfixOcc v])
 
 ppr_expr (SectionR op expr)
   = case unLoc op of
@@ -422,7 +431,7 @@ ppr_expr (SectionR op expr)
 
     pp_prefixly = hang (hsep [text "( \\ x_ ->", ppr op, ptext (sLit "x_")])
                        4 ((<>) pp_expr rparen)
-    pp_infixly v = sep [pprHsInfix v, pp_expr]
+    pp_infixly v = sep [pprInfixOcc v, pp_expr]
 
 ppr_expr (ExplicitTuple exprs boxity)
   = tupleParens (boxityNormalTupleSort boxity) (fcat (ppr_tup_args exprs))
@@ -503,14 +512,9 @@ ppr_expr (HsQuasiQuoteE qq)  = ppr qq
 ppr_expr (HsProc pat (L _ (HsCmdTop cmd _ _ _)))
   = hsep [ptext (sLit "proc"), ppr pat, ptext (sLit "->"), ppr cmd]
 
-ppr_expr (HsTick tickId vars exp)
+ppr_expr (HsTick tickish exp)
   = pprTicks (ppr exp) $
-    hcat [ptext (sLit "tick<"),
-    ppr tickId,
-    ptext (sLit ">("),
-    hsep (map pprHsVar vars),
-    ppr exp,
-    ptext (sLit ")")]
+    ppr tickish <+> ppr exp
 ppr_expr (HsBinTick tickIdTrue tickIdFalse exp)
   = pprTicks (ppr exp) $
     hcat [ptext (sLit "bintick<"),
@@ -537,7 +541,7 @@ ppr_expr (HsArrApp arrow arg _ HsHigherOrderApp False)
   = hsep [ppr_lexpr arg, ptext (sLit ">>-"), ppr_lexpr arrow]
 
 ppr_expr (HsArrForm (L _ (HsVar v)) (Just _) [arg1, arg2])
-  = sep [pprCmdArg (unLoc arg1), hsep [pprHsInfix v, pprCmdArg (unLoc arg2)]]
+  = sep [pprCmdArg (unLoc arg1), hsep [pprInfixOcc v, pprCmdArg (unLoc arg2)]]
 ppr_expr (HsArrForm op _ args)
   = hang (ptext (sLit "(|") <> ppr_lexpr op)
          4 (sep (map (pprCmdArg.unLoc) args) <> ptext (sLit "|)"))
@@ -924,10 +928,11 @@ data StmtLR idL idR
      , recS_mfix_fn :: SyntaxExpr idR -- The mfix function
 
         -- These fields are only valid after typechecking
-     , recS_rec_rets :: [PostTcExpr] -- These expressions correspond 1-to-1 with
-                                     -- recS_rec_ids, and are the
-                                     -- expressions that should be returned by
-                                     -- the recursion.
+     , recS_later_rets :: [PostTcExpr] -- (only used in the arrow version)
+     , recS_rec_rets :: [PostTcExpr] -- These expressions correspond 1-to-1
+                                     -- with recS_later_ids and recS_rec_ids,
+                                     -- and are the expressions that should be
+                                     -- returned by the recursion.
                                      -- They may not quite be the Ids themselves,
                                      -- because the Id may be *polymorphic*, but
                                      -- the returned thing has to be *monomorphic*, 
@@ -940,12 +945,8 @@ data StmtLR idL idR
   deriving (Data, Typeable)
 
 data TransForm	 -- The 'f' below is the 'using' function, 'e' is the by function
-  = ThenForm	 -- then f          or    then f by e        (depending on trS_by)
-  | GroupFormU	 -- group using f   or    group using f by e (depending on trS_by)
-  | GroupFormB   -- group by e  
-      -- In the GroupByFormB, trS_using is filled in with
-      --    'groupWith' (list comprehensions) or 
-      --    'groupM' (monad comprehensions)
+  = ThenForm     -- then f               or    then f by e             (depending on trS_by)
+  | GroupForm	   -- then group using f   or    then group by e using f (depending on trS_by)
   deriving (Data, Typeable)
 \end{code}
 
@@ -1075,12 +1076,7 @@ expressions:
    =>
   guard exp >> [ body | stmts ]
 
-Grouping/parallel statements require the 'Control.Monad.Group.groupM' and
-'Control.Monad.Zip.mzip' functions:
-
-  [ body | stmts, then group by e, rest]
-   =>
-  groupM [ body | stmts ] >>= \bndrs -> [ body | rest ]
+Parallel statements require the 'Control.Monad.Zip.mzip' function:
 
   [ body | stmts1 | stmts2 | .. ]
    =>
@@ -1123,9 +1119,7 @@ pprTransStmt :: OutputableBndr id => Maybe (LHsExpr id)
 				  -> SDoc
 pprTransStmt by using ThenForm
   = sep [ ptext (sLit "then"), nest 2 (ppr using), nest 2 (pprBy by)]
-pprTransStmt by _ GroupFormB
-  = sep [ ptext (sLit "then group"), nest 2 (pprBy by) ]
-pprTransStmt by using GroupFormU
+pprTransStmt by using GroupForm
   = sep [ ptext (sLit "then group"), nest 2 (pprBy by), nest 2 (ptext (sLit "using") <+> ppr using)]
 
 pprBy :: OutputableBndr id => Maybe (LHsExpr id) -> SDoc
@@ -1194,7 +1188,8 @@ data HsBracket id = ExpBr (LHsExpr id)   -- [|  expr  |]
                   | DecBrL [LHsDecl id]	 -- [d| decls |]; result of parser
                   | DecBrG (HsGroup id)  -- [d| decls |]; result of renamer
                   | TypBr (LHsType id)   -- [t| type  |]
-                  | VarBr id             -- 'x, ''T
+                  | VarBr Bool id        -- True: 'x, False: ''T
+                                         -- (The Bool flag is used only in pprHsBracket)
   deriving (Data, Typeable)
 
 instance OutputableBndr id => Outputable (HsBracket id) where
@@ -1207,11 +1202,8 @@ pprHsBracket (PatBr p) 	 = thBrackets (char 'p') (ppr p)
 pprHsBracket (DecBrG gp) = thBrackets (char 'd') (ppr gp)
 pprHsBracket (DecBrL ds) = thBrackets (char 'd') (vcat (map ppr ds))
 pprHsBracket (TypBr t) 	 = thBrackets (char 't') (ppr t)
-pprHsBracket (VarBr n) 	 = char '\'' <> ppr n
--- Infelicity: can't show ' vs '', because
--- we can't ask n what its OccName is, because the
--- pretty-printer for HsExpr doesn't ask for NamedThings
--- But the pretty-printer for names will show the OccName class
+pprHsBracket (VarBr True n)  = char '\''         <> ppr n
+pprHsBracket (VarBr False n) = ptext (sLit "''") <> ppr n
 
 thBrackets :: SDoc -> SDoc -> SDoc
 thBrackets pp_kind pp_body = char '[' <> pp_kind <> char '|' <+>

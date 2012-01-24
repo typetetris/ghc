@@ -6,6 +6,13 @@
 The @Inst@ type: dictionaries or method instances
 
 \begin{code}
+{-# OPTIONS -fno-warn-tabs #-}
+-- The above warning supression flag is a temporary kludge.
+-- While working on this module you are encouraged to remove it and
+-- detab the module (please do the detabbing in a separate patch). See
+--     http://hackage.haskell.org/trac/ghc/wiki/Commentary/CodingStyle#TabsvsSpaces
+-- for details
+
 module Inst ( 
        deeplySkolemise, 
        deeplyInstantiate, instCall, instStupidTheta,
@@ -20,14 +27,13 @@ module Inst (
        -- Simple functions over evidence variables
        hasEqualities, unitImplication,
        
-       tyVarsOfWC, tyVarsOfBag, tyVarsOfEvVarXs, tyVarsOfEvVarX,
+       tyVarsOfWC, tyVarsOfBag, 
        tyVarsOfEvVar, tyVarsOfEvVars, tyVarsOfImplication,
+       tyVarsOfCt, tyVarsOfCts, tyVarsOfCDict, tyVarsOfCDicts,
 
-       tidyWantedEvVar, tidyWantedEvVars, tidyWC,
-       tidyEvVar, tidyImplication, tidyFlavoredEvVar,
+       tidyEvVar, tidyCt, tidyGivenLoc,
 
-       substWantedEvVar, substWantedEvVars, substFlavoredEvVar,
-       substEvVar, substImplication
+       substEvVar, substImplication, substCt
     ) where
 
 #include "HsVersions.h"
@@ -40,6 +46,7 @@ import HsSyn
 import TcHsSyn
 import TcRnMonad
 import TcEnv
+import TcEvidence
 import InstEnv
 import FunDeps
 import TcMType
@@ -78,7 +85,7 @@ emitWanteds origin theta = mapM (emitWanted origin) theta
 emitWanted :: CtOrigin -> TcPredType -> TcM EvVar
 emitWanted origin pred = do { loc <- getCtLoc origin
                             ; ev  <- newWantedEvVar pred
-                            ; emitFlat (mkEvVarX ev loc)
+                            ; emitFlat (mkNonCanonical ev (Wanted loc))
                             ; return ev }
 
 newMethodFromName :: CtOrigin -> Name -> TcRhoType -> TcM (HsExpr TcId)
@@ -215,7 +222,7 @@ instCallConstraints origin (pred : preds)
   = do  { traceTc "instCallConstraints" $ ppr (mkEqPred (ty1, ty2))
         ; co <- unifyType ty1 ty2
 	; co_fn <- instCallConstraints origin preds
-        ; return (co_fn <.> WpEvApp (EvCoercionBox co)) }
+        ; return (co_fn <.> WpEvApp (EvCoercion co)) }
 
   | otherwise
   = do	{ ev_var <- emitWanted origin pred
@@ -370,7 +377,7 @@ syntaxNameCtxt name orig ty tidy_env = do
 \begin{code}
 getOverlapFlag :: TcM OverlapFlag
 getOverlapFlag 
-  = do  { dflags <- getDOpts
+  = do  { dflags <- getDynFlags
         ; let overlap_ok    = xopt Opt_OverlappingInstances dflags
               incoherent_ok = xopt Opt_IncoherentInstances  dflags
               safeOverlap   = safeLanguageOn dflags
@@ -386,7 +393,7 @@ tcGetInstEnvs :: TcM (InstEnv, InstEnv)
 tcGetInstEnvs = do { eps <- getEps; env <- getGblEnv;
 		     return (eps_inst_env eps, tcg_inst_env env) }
 
-tcExtendLocalInstEnv :: [Instance] -> TcM a -> TcM a
+tcExtendLocalInstEnv :: [ClsInst] -> TcM a -> TcM a
   -- Add new locally-defined instances
 tcExtendLocalInstEnv dfuns thing_inside
  = do { traceDFuns dfuns
@@ -396,7 +403,7 @@ tcExtendLocalInstEnv dfuns thing_inside
 			 tcg_inst_env = inst_env' }
       ; setGblEnv env' thing_inside }
 
-addLocalInst :: InstEnv -> Instance -> TcM InstEnv
+addLocalInst :: InstEnv -> ClsInst -> TcM InstEnv
 -- Check that the proposed new instance is OK, 
 -- and then add it to the home inst env
 -- If overwrite_inst, then we can overwrite a direct match
@@ -459,30 +466,30 @@ addLocalInst home_ie ispec = do
                     , let (_,_,_,dup_tys) = instanceHead dup_ispec
                     , isJust (tcMatchTys (mkVarSet tvs') tys' dup_tys)]
 
-traceDFuns :: [Instance] -> TcRn ()
+traceDFuns :: [ClsInst] -> TcRn ()
 traceDFuns ispecs
   = traceTc "Adding instances:" (vcat (map pp ispecs))
   where
     pp ispec = ppr (instanceDFunId ispec) <+> colon <+> ppr ispec
 	-- Print the dfun name itself too
 
-funDepErr :: Instance -> [Instance] -> TcRn ()
+funDepErr :: ClsInst -> [ClsInst] -> TcRn ()
 funDepErr ispec ispecs
   = addDictLoc ispec $
     addErr (hang (ptext (sLit "Functional dependencies conflict between instance declarations:"))
 	       2 (pprInstances (ispec:ispecs)))
-dupInstErr :: Instance -> Instance -> TcRn ()
+dupInstErr :: ClsInst -> ClsInst -> TcRn ()
 dupInstErr ispec dup_ispec
   = addDictLoc ispec $
     addErr (hang (ptext (sLit "Duplicate instance declarations:"))
 	       2 (pprInstances [ispec, dup_ispec]))
-overlappingInstErr :: Instance -> Instance -> TcRn ()
+overlappingInstErr :: ClsInst -> ClsInst -> TcRn ()
 overlappingInstErr ispec dup_ispec
   = addDictLoc ispec $
     addErr (hang (ptext (sLit "Overlapping instance declarations:"))
 	       2 (pprInstances [ispec, dup_ispec]))
 
-addDictLoc :: Instance -> TcRn a -> TcRn a
+addDictLoc :: ClsInst -> TcRn a -> TcRn a
 addDictLoc ispec thing_inside
   = setSrcSpan (mkSrcSpan loc loc) thing_inside
   where
@@ -505,30 +512,43 @@ hasEqualities :: [EvVar] -> Bool
 -- Has a bunch of canonical constraints (all givens) got any equalities in it?
 hasEqualities givens = any (has_eq . evVarPred) givens
   where
-    has_eq = has_eq' . predTypePredTree
+    has_eq = has_eq' . classifyPredType
 
     has_eq' (EqPred {})          = True
     has_eq' (IPPred {})          = False
     has_eq' (ClassPred cls _tys) = any has_eq (classSCTheta cls)
-    has_eq' (TuplePred ts)       = any has_eq' ts
+    has_eq' (TuplePred ts)       = any has_eq ts
     has_eq' (IrredPred _)        = True -- Might have equalities in it after reduction?
 
 ---------------- Getting free tyvars -------------------------
+
+tyVarsOfCt :: Ct -> TcTyVarSet
+tyVarsOfCt (CTyEqCan { cc_tyvar = tv, cc_rhs = xi })    = extendVarSet (tyVarsOfType xi) tv
+tyVarsOfCt (CFunEqCan { cc_tyargs = tys, cc_rhs = xi }) = tyVarsOfTypes (xi:tys)
+tyVarsOfCt (CDictCan { cc_tyargs = tys }) 	        = tyVarsOfTypes tys
+tyVarsOfCt (CIPCan { cc_ip_ty = ty })                   = tyVarsOfType ty
+tyVarsOfCt (CIrredEvCan { cc_ty = ty })                 = tyVarsOfType ty
+tyVarsOfCt (CNonCanonical { cc_id = ev })               = tyVarsOfEvVar ev
+
+tyVarsOfCDict :: Ct -> TcTyVarSet 
+tyVarsOfCDict (CDictCan { cc_tyargs = tys }) = tyVarsOfTypes tys
+tyVarsOfCDict _ct                            = emptyVarSet 
+
+tyVarsOfCDicts :: Cts -> TcTyVarSet 
+tyVarsOfCDicts = foldrBag (unionVarSet . tyVarsOfCDict) emptyVarSet
+
+tyVarsOfCts :: Cts -> TcTyVarSet
+tyVarsOfCts = foldrBag (unionVarSet . tyVarsOfCt) emptyVarSet
+
 tyVarsOfWC :: WantedConstraints -> TyVarSet
 tyVarsOfWC (WC { wc_flat = flat, wc_impl = implic, wc_insol = insol })
-  = tyVarsOfEvVarXs flat `unionVarSet`
+  = tyVarsOfCts flat `unionVarSet`
     tyVarsOfBag tyVarsOfImplication implic `unionVarSet`
-    tyVarsOfEvVarXs insol
+    tyVarsOfCts insol
 
 tyVarsOfImplication :: Implication -> TyVarSet
 tyVarsOfImplication (Implic { ic_skols = skols, ic_wanted = wanted })
-  = tyVarsOfWC wanted `minusVarSet` skols
-
-tyVarsOfEvVarX :: EvVarX a -> TyVarSet
-tyVarsOfEvVarX (EvVarX ev _) = tyVarsOfEvVar ev
-
-tyVarsOfEvVarXs :: Bag (EvVarX a) -> TyVarSet
-tyVarsOfEvVarXs = tyVarsOfBag tyVarsOfEvVarX
+  = tyVarsOfWC wanted `delVarSetList` skols
 
 tyVarsOfEvVar :: EvVar -> TyVarSet
 tyVarsOfEvVar ev = tyVarsOfType $ evVarPred ev
@@ -540,36 +560,16 @@ tyVarsOfBag :: (a -> TyVarSet) -> Bag a -> TyVarSet
 tyVarsOfBag tvs_of = foldrBag (unionVarSet . tvs_of) emptyVarSet
 
 ---------------- Tidying -------------------------
-tidyWC :: TidyEnv -> WantedConstraints -> WantedConstraints
-tidyWC env (WC { wc_flat = flat, wc_impl = implic, wc_insol = insol })
-  = WC { wc_flat  = tidyWantedEvVars env flat
-       , wc_impl  = mapBag (tidyImplication env) implic
-       , wc_insol = mapBag (tidyFlavoredEvVar env) insol }
 
-tidyImplication :: TidyEnv -> Implication -> Implication
-tidyImplication env implic@(Implic { ic_skols = tvs
-                                   , ic_given = given
-                                   , ic_wanted = wanted
-                                   , ic_loc = loc })
-  = implic { ic_skols = mkVarSet tvs'
-           , ic_given = map (tidyEvVar env1) given
-           , ic_wanted = tidyWC env1 wanted
-           , ic_loc = tidyGivenLoc env1 loc }
-  where
-   (env1, tvs') = mapAccumL tidyTyVarBndr env (varSetElems tvs)
+tidyCt :: TidyEnv -> Ct -> Ct
+-- Also converts it to non-canonical
+tidyCt env ct 
+  = CNonCanonical { cc_id     = tidyEvVar env (cc_id ct)
+                  , cc_flavor = tidyFlavor env (cc_flavor ct)
+                  , cc_depth  = cc_depth ct } 
 
 tidyEvVar :: TidyEnv -> EvVar -> EvVar
 tidyEvVar env var = setVarType var (tidyType env (varType var))
-
-tidyWantedEvVar :: TidyEnv -> WantedEvVar -> WantedEvVar
-tidyWantedEvVar env (EvVarX v l) = EvVarX (tidyEvVar env v) l
-
-tidyWantedEvVars :: TidyEnv -> Bag WantedEvVar -> Bag WantedEvVar
-tidyWantedEvVars env = mapBag (tidyWantedEvVar env)
-
-tidyFlavoredEvVar :: TidyEnv -> FlavoredEvVar -> FlavoredEvVar
-tidyFlavoredEvVar env (EvVarX v fl)
-  = EvVarX (tidyEvVar env v) (tidyFlavor env fl)
 
 tidyFlavor :: TidyEnv -> CtFlavor -> CtFlavor
 tidyFlavor env (Given loc gk) = Given (tidyGivenLoc env loc) gk
@@ -581,39 +581,50 @@ tidyGivenLoc env (CtLoc skol span ctxt) = CtLoc (tidySkolemInfo env skol) span c
 tidySkolemInfo :: TidyEnv -> SkolemInfo -> SkolemInfo
 tidySkolemInfo env (SigSkol cx ty) = SigSkol cx (tidyType env ty)
 tidySkolemInfo env (InferSkol ids) = InferSkol (mapSnd (tidyType env) ids)
+tidySkolemInfo env (UnifyForAllSkol skol_tvs ty) 
+  = UnifyForAllSkol (map tidy_tv skol_tvs) (tidyType env ty)
+  where
+    tidy_tv tv = case getTyVar_maybe ty' of
+                   Just tv' -> tv'
+                   Nothing  -> pprPanic "ticySkolemInfo" (ppr tv <+> ppr ty')
+               where
+                 ty' = tidyTyVarOcc env tv
 tidySkolemInfo _   info            = info
 
 ---------------- Substitution -------------------------
+substCt :: TvSubst -> Ct -> Ct 
+-- Conservatively converts it to non-canonical:
+-- Postcondition: if the constraint does not get rewritten
+substCt subst ct
+  | ev <- cc_id ct, pty <- evVarPred (cc_id ct) 
+  , sty <- substTy subst pty 
+  = if sty `eqType` pty then 
+        ct { cc_flavor = substFlavor subst (cc_flavor ct) }
+    else 
+        CNonCanonical { cc_id  = setVarType ev sty 
+                      , cc_flavor = substFlavor subst (cc_flavor ct)
+                      , cc_depth  = cc_depth ct }
+
 substWC :: TvSubst -> WantedConstraints -> WantedConstraints
 substWC subst (WC { wc_flat = flat, wc_impl = implic, wc_insol = insol })
-  = WC { wc_flat = substWantedEvVars subst flat
-       , wc_impl = mapBag (substImplication subst) implic
-       , wc_insol = mapBag (substFlavoredEvVar subst) insol }
+  = WC { wc_flat  = mapBag (substCt subst) flat
+       , wc_impl  = mapBag (substImplication subst) implic
+       , wc_insol = mapBag (substCt subst) insol }
 
 substImplication :: TvSubst -> Implication -> Implication
 substImplication subst implic@(Implic { ic_skols = tvs
                                       , ic_given = given
                                       , ic_wanted = wanted
                                       , ic_loc = loc })
-  = implic { ic_skols  = mkVarSet tvs'
+  = implic { ic_skols  = tvs'
            , ic_given  = map (substEvVar subst1) given
            , ic_wanted = substWC subst1 wanted
            , ic_loc    = substGivenLoc subst1 loc }
   where
-   (subst1, tvs') = mapAccumL substTyVarBndr subst (varSetElems tvs)
+   (subst1, tvs') = mapAccumL substTyVarBndr subst tvs
 
 substEvVar :: TvSubst -> EvVar -> EvVar
 substEvVar subst var = setVarType var (substTy subst (varType var))
-
-substWantedEvVars :: TvSubst -> Bag WantedEvVar -> Bag WantedEvVar
-substWantedEvVars subst = mapBag (substWantedEvVar subst)
-
-substWantedEvVar :: TvSubst -> WantedEvVar -> WantedEvVar
-substWantedEvVar subst (EvVarX v l) = EvVarX (substEvVar subst v) l
-
-substFlavoredEvVar :: TvSubst -> FlavoredEvVar -> FlavoredEvVar
-substFlavoredEvVar subst (EvVarX v fl)
-  = EvVarX (substEvVar subst v) (substFlavor subst fl)
 
 substFlavor :: TvSubst -> CtFlavor -> CtFlavor
 substFlavor subst (Given loc gk) = Given (substGivenLoc subst loc) gk

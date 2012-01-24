@@ -6,6 +6,13 @@
 --
 -----------------------------------------------------------------------------
 
+{-# OPTIONS -fno-warn-tabs #-}
+-- The above warning supression flag is a temporary kludge.
+-- While working on this module you are encouraged to remove it and
+-- detab the module (please do the detabbing in a separate patch). See
+--     http://hackage.haskell.org/trac/ghc/wiki/Commentary/CodingStyle#TabsvsSpaces
+-- for details
+
 module SPARC.CodeGen ( 
 	cmmTopCodeGen, 
 	generateJumpTableForInstr,
@@ -56,7 +63,7 @@ cmmTopCodeGen :: RawCmmDecl
 
 cmmTopCodeGen (CmmProc info lab (ListGraph blocks))
  = do
-      dflags <- getDynFlagsNat
+      dflags <- getDynFlags
       let platform = targetPlatform dflags
       (nat_blocks,statics) <- mapAndUnzipM (basicBlockCodeGen platform) blocks
 
@@ -128,7 +135,7 @@ stmtToInstrs stmt = case stmt of
 	where ty = cmmExprType src
 	      size = cmmTypeSize ty
 
-    CmmCall target result_regs args _ _
+    CmmCall target result_regs args _
        -> genCCall target result_regs args
 
     CmmBranch	id		-> genBranch id
@@ -136,7 +143,7 @@ stmtToInstrs stmt = case stmt of
     CmmSwitch	arg ids		-> genSwitch arg ids
     CmmJump	arg _		-> genJump arg
 
-    CmmReturn	_		
+    CmmReturn	 		
      -> panic "stmtToInstrs: return statement should have been cps'd away"
 
 

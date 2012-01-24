@@ -12,6 +12,13 @@ Much of the rationale for these things is in the ``details'' part of
 the STG paper.
 
 \begin{code}
+{-# OPTIONS -fno-warn-tabs #-}
+-- The above warning supression flag is a temporary kludge.
+-- While working on this module you are encouraged to remove it and
+-- detab the module (please do the detabbing in a separate patch). See
+--     http://hackage.haskell.org/trac/ghc/wiki/Commentary/CodingStyle#TabsvsSpaces
+-- for details
+
 module ClosureInfo (
 	ClosureInfo(..), LambdaFormInfo(..),	-- would be abstract but
 	StandardFormInfo(..),			-- mkCmmInfo looks inside
@@ -36,7 +43,7 @@ module ClosureInfo (
         closureFunInfo, isKnownFun,
         funTag, funTagLFInfo, tagForArity, clHasCafRefs,
 
-	enterIdLabel, enterLocalIdLabel, enterReturnPtLabel,
+        enterIdLabel, enterReturnPtLabel,
 
 	nodeMustPointToIt, 
 	CallMethod(..), getCallMethod,
@@ -956,7 +963,10 @@ infoTableLabelFromCI :: ClosureInfo -> CLabel
 infoTableLabelFromCI = fst . labelsFromCI
 
 entryLabelFromCI :: ClosureInfo -> CLabel
-entryLabelFromCI = snd . labelsFromCI
+entryLabelFromCI ci
+  | tablesNextToCode = info_lbl
+  | otherwise        = entry_lbl
+  where (info_lbl, entry_lbl) = labelsFromCI ci
 
 labelsFromCI :: ClosureInfo -> (CLabel, CLabel) -- (Info, Entry)
 labelsFromCI cl@(ClosureInfo { closureName = name,
@@ -1024,11 +1034,6 @@ enterIdLabel :: Name -> CafInfo -> CLabel
 enterIdLabel id
   | tablesNextToCode = mkInfoTableLabel id
   | otherwise        = mkEntryLabel id
-
-enterLocalIdLabel :: Name -> CafInfo -> CLabel
-enterLocalIdLabel id
-  | tablesNextToCode = mkLocalInfoTableLabel id
-  | otherwise        = mkLocalEntryLabel id
 
 enterReturnPtLabel :: Unique -> CLabel
 enterReturnPtLabel name
