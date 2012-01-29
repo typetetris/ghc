@@ -4440,7 +4440,7 @@ do_Elf_Rel_relocations ( ObjectCode* oc, char* ehdrC,
          case R_ARM_MOVW_ABS_NC:
          {
             StgWord32 *word = (StgWord32 *)P;
-            StgInt16 offset = ((*word & 0xf0000) >> 4)
+            StgInt32 offset = ((*word & 0xf0000) >> 4)
                             | (*word & 0xfff);
             fprintf(fout, "  MOVT_ABS");
             // Sign extend from 16 to 32 bits
