@@ -2646,14 +2646,14 @@ static SymbolExtra* makeArmSymbolExtra( ObjectCode* oc,
                         0x4760 };
 
     // Patch lower half-word into movw
-    code[0] |= ((target>>11) & 0x1) << 10;
     code[0] |= (target>>12) & 0xf;
+    code[0] |= ((target>>11) & 0x1) << 10;
     code[1] |= ((target>>8) & 0x7) << 12;
     code[1] |= target & 0xff;
     // Patch upper half-word into movt
     target >>= 16;
-    code[2] |= ((target>>11) & 0x1) << 10;
     code[2] |= (target>>12) & 0xf;
+    code[2] |= ((target>>11) & 0x1) << 10;
     code[3] |= ((target>>8) & 0x7) << 12;
     code[3] |= target & 0xff;
 
