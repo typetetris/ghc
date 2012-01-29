@@ -4348,7 +4348,7 @@ do_Elf_Rel_relocations ( ObjectCode* oc, char* ehdrC,
 
 #ifdef arm_HOST_ARCH
          // Thumb instructions have bit 0 of symbol's st_value set
-         is_target_thm = sym.st_value & 0x1;
+         is_target_thm = S & 0x1;
          T = sym.st_info & STT_FUNC && is_target_thm;
          fprintf(fout, "  T=%d", T);
 
