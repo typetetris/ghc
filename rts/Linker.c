@@ -2641,9 +2641,9 @@ static SymbolExtra* makeArmSymbolExtra( ObjectCode* oc,
     //   movw r12, #0
     //   movt r12, #0
     //   bx r12
-    static uint16_t code[] = { 0xf240,  0x0c00,
-                               0xf2c0,  0x0c00,
-                               0x4760 };
+    uint16_t code[] = { 0xf240,  0x0c00,
+                        0xf2c0,  0x0c00,
+                        0x4760 };
 
     // Patch lower half-word into movw
     code[0] |= ((target>>11) & 0x1) << 10;
