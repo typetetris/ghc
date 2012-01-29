@@ -4531,6 +4531,7 @@ do_Elf_Rel_relocations ( ObjectCode* oc, char* ehdrC,
             fprintf(fout, "  %s", ELF_R_TYPE(info) == R_ARM_THM_MOVT_ABS ? "THM_MOVT_ABS" : "THM_MOVW_ABS_NC");
 
             offset = (offset ^ 0x8000) - 0x8000; // Sign extend
+            offset += 0x1000; // FIXME
             offset += S;
 	    fprintf(fout, "  offset=%08x", offset);
             if (ELF_R_TYPE(info) == R_ARM_THM_MOVW_ABS_NC) {
