@@ -4408,9 +4408,11 @@ do_Elf_Rel_relocations ( ObjectCode* oc, char* ehdrC,
             if ((is_target_thm && ELF_R_TYPE(info) == R_ARM_JUMP24) || overflow) {
                fprintf(fout, "  veneer");
                // Generate veneer
-               offset = &(makeArmSymbolExtra(oc, ELF_R_SYM(info), S+imm, 0, is_target_thm)->jumpIsland);
-               offset -= P - 8;
-               offset &= ~1; // Clear instruction mode bit
+               // The +8 below is to undo the PC-bias compensation done by the object producer
+               SymbolExtra *extra = makeArmSymbolExtra(oc, ELF_R_SYM(info), S+imm+8, 0, is_target_thm);
+               // The -8 below is to compensate for PC bias
+               offset = (StgWord32) &extra->jumpIsland - P - 8;
+               offset &= ~1; // Clear thumb indicator bit
             } else if (is_target_thm && ELF_R_TYPE(info) == R_ARM_CALL) {
                fprintf(fout, "  mode");
                StgWord32 cond = (*word & 0xf0000000) >> 28;
@@ -4464,6 +4466,7 @@ do_Elf_Rel_relocations ( ObjectCode* oc, char* ehdrC,
             StgWord16 *lower = (StgWord16 *)(P + 2);
 
             int overflow;
+            int to_thm = (*lower >> 12) & 1;
             int sign = (*upper >> 10) & 1;
             int j1, j2, i1, i2;
             fprintf(fout, "  THM_CALL");
@@ -4482,19 +4485,19 @@ do_Elf_Rel_relocations ( ObjectCode* oc, char* ehdrC,
                imm -= 0x02000000;
 
             offset = ((imm + S) | T) - P;
-            overflow = offset <= (StgInt32)0xff000000 || offset >= (StgInt32)0x01000000;
+            overflow = offset <= (StgWord32)0xff000000 || offset >= (StgWord32)0x01000000;
 	    fprintf(fout, "  offset=%08x", offset);
 
             if ((!is_target_thm && ELF_R_TYPE(info) == R_ARM_THM_JUMP24) || overflow) {
 	       fprintf(fout, "  veneer");
                // Generate veneer
-               offset = &(makeArmSymbolExtra(oc, ELF_R_SYM(info), S+imm, 1, is_target_thm)->jumpIsland);
-               offset -= P - 4;
-               offset |= 1; // Set thumb indicator bit
+               SymbolExtra *extra = makeArmSymbolExtra(oc, ELF_R_SYM(info), S+imm+4, 1, is_target_thm);
+               offset = (StgWord32) &extra->jumpIsland - P - 4;
+               to_thm = 1;
             } else if (!is_target_thm && ELF_R_TYPE(info) == R_ARM_THM_CALL) {
 	       fprintf(fout, "  mode");
-               *lower &= ~(1<<12);   // Change instruction to BLX
-               offset &= ~1;         // Make sure offset is aligned properly
+               offset &= ~0x3;
+               to_thm = 0;
             }
 
             // Reencode instruction
@@ -4505,6 +4508,7 @@ do_Elf_Rel_relocations ( ObjectCode* oc, char* ehdrC,
                    | ((offset >> 12) & 0x03ff) );
             *lower = ( (*lower & 0xd000)
                    | (j1 << 13)
+                   | (to_thm << 12)
                    | (j2 << 11)
                    | ((offset >> 1) & 0x07ff) );
             break;
