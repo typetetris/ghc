@@ -4525,14 +4525,13 @@ do_Elf_Rel_relocations ( ObjectCode* oc, char* ehdrC,
          {
             StgWord16 *upper = (StgWord16 *)P;
             StgWord16 *lower = (StgWord16 *)(P + 2);
-            StgInt32 offset = (*upper & 0x000f << 12)
+            StgInt32 offset = ((*upper & 0x000f) << 12)
                             | ((*upper & 0x0400) << 1)
                             | ((*lower & 0x7000) >> 4)
                             | (*lower & 0x00ff);
             fprintf(fout, "  %s", ELF_R_TYPE(info) == R_ARM_THM_MOVT_ABS ? "THM_MOVT_ABS" : "THM_MOVW_ABS_NC");
 
             offset = (offset ^ 0x8000) - 0x8000; // Sign extend
-            offset += 0x1000; // FIXME
 	    fprintf(fout, "  imm=%s%08x", offset>0?" ":"-", abs(offset));
             offset += S;
 	    fprintf(fout, "  offset=%s%08x", offset>0?" ":"-", abs(offset));
