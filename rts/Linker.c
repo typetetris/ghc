@@ -4276,9 +4276,6 @@ do_Elf_Rel_relocations ( ObjectCode* oc, char* ehdrC,
    IF_DEBUG(linker,debugBelch( "relocations for section %d using symtab %d and strtab %d\n",
                           target_shndx, symtab_shndx, strtab_shndx ));
 
-   FILE* fout = fopen("debug.out", "a");
-   fprintf(fout, "Relocations for section %d of %s\n", target_shndx, oc->fileName);
-
    /* Skip sections that we're not interested in. */
    {
        int is_bss;
@@ -4311,7 +4308,6 @@ do_Elf_Rel_relocations ( ObjectCode* oc, char* ehdrC,
 
       IF_DEBUG(linker,debugBelch( "Rel entry %3d is raw(%6p %6p)",
                              j, (void*)offset, (void*)info ));
-      fprintf(fout, "  rel %3d for 0x%08x is ", j, P);
       if (!info) {
          IF_DEBUG(linker,debugBelch( " ZERO" ));
          S = 0;
@@ -4344,13 +4340,11 @@ do_Elf_Rel_relocations ( ObjectCode* oc, char* ehdrC,
             return 0;
          }
          IF_DEBUG(linker,debugBelch( "`%s' resolves to %p\n", symbol, (void*)S ));
-         fprintf(fout, "  %s resolves to S=%p", symbol, (void*)S);
 
 #ifdef arm_HOST_ARCH
          // Thumb instructions have bit 0 of symbol's st_value set
          is_target_thm = S & 0x1;
          T = sym.st_info & STT_FUNC && is_target_thm;
-         fprintf(fout, "  is_thm=%d, T=%d", is_target_thm, T);
 
          // Make sure we clear bit 0. Strictly speaking we should have done
          // this to st_value above but I believe alignment requirements should
@@ -4376,13 +4370,11 @@ do_Elf_Rel_relocations ( ObjectCode* oc, char* ehdrC,
 #        ifdef arm_HOST_ARCH
          case R_ARM_ABS32:
          case R_ARM_TARGET1:  // Specified by Linux ARM ABI to be equivalent to ABS32
-            fprintf(fout, "  ABS32 imm=%x", *(Elf32_Word*)P);
             *(Elf32_Word *)P += S;
             *(Elf32_Word *)P |= T;
             break;
 
          case R_ARM_REL32:
-            fprintf(fout, "  REL32 imm=%x", *(Elf32_Word*)P);
             *(Elf32_Word *)P += S;
             *(Elf32_Word *)P |= T;
             *(Elf32_Word *)P -= P;
@@ -4395,28 +4387,22 @@ do_Elf_Rel_relocations ( ObjectCode* oc, char* ehdrC,
             StgInt32 imm = (*word & 0x00ffffff) << 2;
             StgInt32 offset;
             int overflow;
-            fprintf(fout, "  %s", ELF_R_TYPE(info) == R_ARM_JUMP24?"JUMP24":"CALL");
 
             // Sign extend 24 to 32 bits
             if (imm & 0x02000000)
                imm -= 0x04000000;
             offset = ((S + imm) | T) - P;
-	    fprintf(fout, "  offset=%s%08x, imm=%s%08x", offset>0?" ":"-", abs(offset)
-                                , imm>0?" ":"-", abs(imm));
 
             overflow = offset <= (StgInt32)0xfe000000 || offset >= (StgInt32)0x02000000;
 
             if ((is_target_thm && ELF_R_TYPE(info) == R_ARM_JUMP24) || overflow) {
                // Generate veneer
-               fprintf(fout, "  overflow=%d", overflow);
                // The +8 below is to undo the PC-bias compensation done by the object producer
                SymbolExtra *extra = makeArmSymbolExtra(oc, ELF_R_SYM(info), S+imm+8, 0, is_target_thm);
-               fprintf(fout, "  veneer (%p)", &extra->jumpIsland);
                // The -8 below is to compensate for PC bias
                offset = (StgWord32) &extra->jumpIsland - P - 8;
                offset &= ~1; // Clear thumb indicator bit
             } else if (is_target_thm && ELF_R_TYPE(info) == R_ARM_CALL) {
-               fprintf(fout, "  mode");
                StgWord32 cond = (*word & 0xf0000000) >> 28;
                if (cond == 0xe) {
                   // Change instruction to BLX
@@ -4444,13 +4430,10 @@ do_Elf_Rel_relocations ( ObjectCode* oc, char* ehdrC,
             StgWord32 *word = (StgWord32 *)P;
             StgInt32 offset = ((*word & 0xf0000) >> 4)
                             | (*word & 0xfff);
-            fprintf(fout, "  %11s", ELF_R_TYPE(info) == R_ARM_MOVT_ABS ? "MOVT_ABS" : "MOVW_ABS_NC");
             // Sign extend from 16 to 32 bits
             offset = (offset ^ 0x8000) - 0x8000;
-	    fprintf(fout, "  imm=%s%08x", offset>0?" ":"-", abs(offset));
 
             offset += S;
-	    fprintf(fout, "  offset=%s%08x", offset>0?" ":"-", abs(offset));
             if (ELF_R_TYPE(info) == R_ARM_MOVT_ABS)
                offset >>= 16;
             else
@@ -4472,7 +4455,6 @@ do_Elf_Rel_relocations ( ObjectCode* oc, char* ehdrC,
             int to_thm = (*lower >> 12) & 1;
             int sign = (*upper >> 10) & 1;
             int j1, j2, i1, i2;
-            fprintf(fout, "  THM_CALL");
 
             // Decode immediate value
             j1 = (*lower >> 13) & 1; i1 = ~(j1 ^ sign) & 1;
@@ -4489,22 +4471,16 @@ do_Elf_Rel_relocations ( ObjectCode* oc, char* ehdrC,
 
             offset = ((imm + S) | T) - P;
             overflow = offset <= (StgWord32)0xff000000 || offset >= (StgWord32)0x01000000;
-	    fprintf(fout, "  offset=%s%08x, imm=%s%08x", offset>0?" ":"-", abs(offset)
-                                , imm>0?" ":"-", abs(imm));
 
             if ((!is_target_thm && ELF_R_TYPE(info) == R_ARM_THM_JUMP24) || overflow) {
-               fprintf(fout, "  overflow=%d", overflow);
                // Generate veneer
                SymbolExtra *extra = makeArmSymbolExtra(oc, ELF_R_SYM(info), S+imm+4, 1, is_target_thm);
-               fprintf(fout, "  veneer (%p)", &extra->jumpIsland);
                offset = (StgWord32) &extra->jumpIsland - P - 4;
                to_thm = 1;
             } else if (!is_target_thm && ELF_R_TYPE(info) == R_ARM_THM_CALL) {
-	       fprintf(fout, "  mode");
                offset &= ~0x3;
                to_thm = 0;
             }
-            fprintf(fout, " to_thm=%d", to_thm);
 
             // Reencode instruction
             i1 = ~(offset >> 23) & 1; j1 = sign ^ i1;
@@ -4529,12 +4505,9 @@ do_Elf_Rel_relocations ( ObjectCode* oc, char* ehdrC,
                             | ((*upper & 0x0400) << 1)
                             | ((*lower & 0x7000) >> 4)
                             | (*lower & 0x00ff);
-            fprintf(fout, "  %s", ELF_R_TYPE(info) == R_ARM_THM_MOVT_ABS ? "THM_MOVT_ABS" : "THM_MOVW_ABS_NC");
 
             offset = (offset ^ 0x8000) - 0x8000; // Sign extend
-	    fprintf(fout, "  imm=%s%08x", offset>0?" ":"-", abs(offset));
             offset += S;
-	    fprintf(fout, "  offset=%s%08x", offset>0?" ":"-", abs(offset));
             if (ELF_R_TYPE(info) == R_ARM_THM_MOVW_ABS_NC) {
                    offset |= T;
             } else if (ELF_R_TYPE(info) == R_ARM_THM_MOVT_ABS) {
@@ -4554,14 +4527,12 @@ do_Elf_Rel_relocations ( ObjectCode* oc, char* ehdrC,
          {
             StgWord16 *word = (StgWord16 *)P;
             StgWord offset = *word & 0x01fe;
-	    fprintf(fout, "  THM_JUMP8");
             offset += S - P;
             if (!is_target_thm) {
                errorBelch("%s: Thumb to ARM transition with JUMP8 relocation not supported\n",
                      oc->fileName);
                return 0;
             }
-	    fprintf(fout, "  offset=%08x", offset);
 
             *word = (*word & ~0x01fe)
                   | (offset & 0x01fe);
@@ -4572,14 +4543,12 @@ do_Elf_Rel_relocations ( ObjectCode* oc, char* ehdrC,
          {
             StgWord16 *word = (StgWord16 *)P;
             StgWord offset = *word & 0x0ffe;
-	    fprintf(fout, "  THM_JUMP11");
             offset += S - P;
             if (!is_target_thm) {
                errorBelch("%s: Thumb to ARM transition with JUMP11 relocation not supported\n",
                      oc->fileName);
                return 0;
             }
-	    fprintf(fout, "  offset=%08x", offset);
 
             *word = (*word & ~0x0ffe)
                   | (offset & 0x0ffe);
@@ -4593,10 +4562,8 @@ do_Elf_Rel_relocations ( ObjectCode* oc, char* ehdrC,
                   oc->fileName, (lnat)ELF_R_TYPE(info));
             return 0;
       }
-      fprintf(fout, "\n");
 
    }
-   fclose(fout);
    return 1;
 }
 
