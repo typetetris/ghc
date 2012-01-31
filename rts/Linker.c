@@ -4376,13 +4376,13 @@ do_Elf_Rel_relocations ( ObjectCode* oc, char* ehdrC,
 #        ifdef arm_HOST_ARCH
          case R_ARM_ABS32:
          case R_ARM_TARGET1:  // Specified by Linux ARM ABI to be equivalent to ABS32
-            fprintf(fout, "  ABS32");
+            fprintf(fout, "  ABS32 imm=%x", *(Elf32_Word*)P);
             *(Elf32_Word *)P += S;
             *(Elf32_Word *)P |= T;
             break;
 
          case R_ARM_REL32:
-            fprintf(fout, "  REL32");
+            fprintf(fout, "  REL32 imm=%x", *(Elf32_Word*)P);
             *(Elf32_Word *)P += S;
             *(Elf32_Word *)P |= T;
             *(Elf32_Word *)P -= P;
@@ -4447,6 +4447,7 @@ do_Elf_Rel_relocations ( ObjectCode* oc, char* ehdrC,
             fprintf(fout, "  %11s", ELF_R_TYPE(info) == R_ARM_MOVT_ABS ? "MOVT_ABS" : "MOVW_ABS_NC");
             // Sign extend from 16 to 32 bits
             offset = (offset ^ 0x8000) - 0x8000;
+	    fprintf(fout, "  imm=%s%08x", offset>0?" ":"-", abs(offset));
 
             offset += S;
 	    fprintf(fout, "  offset=%s%08x", offset>0?" ":"-", abs(offset));
@@ -4532,8 +4533,9 @@ do_Elf_Rel_relocations ( ObjectCode* oc, char* ehdrC,
 
             offset = (offset ^ 0x8000) - 0x8000; // Sign extend
             offset += 0x1000; // FIXME
+	    fprintf(fout, "  imm=%s%08x", offset>0?" ":"-", abs(offset));
             offset += S;
-	    fprintf(fout, "  offset=%08x", offset);
+	    fprintf(fout, "  offset=%s%08x", offset>0?" ":"-", abs(offset));
             if (ELF_R_TYPE(info) == R_ARM_THM_MOVW_ABS_NC) {
                    offset |= T;
             } else if (ELF_R_TYPE(info) == R_ARM_THM_MOVT_ABS) {
