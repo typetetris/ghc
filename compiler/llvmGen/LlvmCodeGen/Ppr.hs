@@ -96,16 +96,25 @@ pprLlvmCmmDecl count (CmmProc mb_info entry_lbl live (ListGraph blks))
            (lbl',sec') = case mb_info of
                            Nothing                   -> (entry_lbl, Nothing)
                            Just (Statics info_lbl _) -> (info_lbl,  sec)
+           lmblocks = map (\(BasicBlock id stmts) ->
+                                LlvmBlock (getUnique id) stmts) blks
            link = if externallyVisibleCLabel lbl'
                       then ExternallyVisible
                       else Internal
-           lmblocks = map (\(BasicBlock id stmts) ->
-                                LlvmBlock (getUnique id) stmts) blks
 
        fun <- mkLlvmFunc live lbl' link  sec' lmblocks
 
-       return (idoc $+$ ppLlvmFunction fun, ivar)
+       -- Create internal alias
+       aliasDoc <- if externallyVisibleCLabel lbl'
+         then do let internalLbl = mkInternalLabel lbl'
+                 alias <- mkLlvmFuncAlias live internalLbl LinkerPrivate fun
+                 let LMGlobal aliasVar _ = alias
+                     LMGlobalVar aliasLbl (LMPointer aliasTy) _ _ _ _ = aliasVar
+                 funInsert aliasLbl aliasTy
+                 return (ppLlvmGlobal alias)
+         else do return empty
 
+       return (idoc $+$ ppLlvmFunction fun $+$ aliasDoc, ivar)
 
 -- | Pretty print CmmStatic
 pprInfoTable :: Int -> CLabel -> CmmStatics -> LlvmM (SDoc, [LlvmVar])

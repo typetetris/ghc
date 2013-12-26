@@ -46,6 +46,8 @@ module CLabel (
         mkAsmTempLabel,
 
         mkPlainModuleInitLabel,
+       
+        mkInternalLabel,
 
         mkSplitMarkerLabel,
         mkDirty_MUT_VAR_Label,
@@ -224,7 +226,12 @@ data CLabel
   -- | A bitmap (function or case return)
   | LargeBitmapLabel
         {-# UNPACK #-} !Unique
-
+  
+  -- | A label for a internal symbol
+  -- This is used by the LLMV codegen to identify symbols with internal linkage.
+  -- This allows us to avoid relocation for calls within a package.
+  | InternalLabel !CLabel
+  
   deriving (Eq, Ord)
 
 
@@ -538,6 +545,9 @@ mkAsmTempLabel a                = AsmTempLabel (getUnique a)
 mkPlainModuleInitLabel :: Module -> CLabel
 mkPlainModuleInitLabel mod      = PlainModuleInitLabel mod
 
+mkInternalLabel :: CLabel -> CLabel
+mkInternalLabel                 = InternalLabel               
+
 -- -----------------------------------------------------------------------------
 -- Convert between different kinds of label
 
@@ -616,6 +626,7 @@ needsCDecl :: CLabel -> Bool
 needsCDecl (SRTLabel _)                 = True
 needsCDecl (LargeSRTLabel _)            = False
 needsCDecl (LargeBitmapLabel _)         = False
+needsCDecl (InternalLabel _)            = True
 needsCDecl (IdLabel _ _ _)              = True
 needsCDecl (CaseLabel _ _)              = True
 needsCDecl (PlainModuleInitLabel _)     = True
@@ -763,6 +774,7 @@ externallyVisibleCLabel (HpcTicksLabel _)       = True
 externallyVisibleCLabel (LargeBitmapLabel _)    = False
 externallyVisibleCLabel (SRTLabel _)            = False
 externallyVisibleCLabel (LargeSRTLabel _)       = False
+externallyVisibleCLabel (InternalLabel _)       = False
 externallyVisibleCLabel (PicBaseLabel {}) = panic "externallyVisibleCLabel PicBaseLabel"
 externallyVisibleCLabel (DeadStripPreventer {}) = panic "externallyVisibleCLabel DeadStripPreventer"
 
@@ -920,6 +932,7 @@ internal names. <type> is one of the following:
          sel_entry              Selector entry code
          cc                     Cost centre
          ccs                    Cost centre stack
+         internal               A symbol internal to a package
 
 Many of these distinctions are only for documentation reasons.  For
 example, _ret is only distinguished from _entry to make it easy to
@@ -979,6 +992,9 @@ pprCLabel platform (DeadStripPreventer lbl)
  | cGhcWithNativeCodeGen == "YES"
    = pprCLabel platform lbl <> ptext (sLit "_dsp")
 
+pprCLabel platform (InternalLabel lbl)
+   = pprCLabel platform lbl <> ptext (sLit "_priv")
+
 pprCLabel platform lbl
    = getPprStyle $ \ sty ->
      if cGhcWithNativeCodeGen == "YES" && asmStyle sty
@@ -1017,9 +1033,11 @@ pprCLbl (SRTLabel u)
 
 pprCLbl (LargeSRTLabel u)  = pprUnique u <> pp_cSEP <> ptext (sLit "srtd")
 pprCLbl (LargeBitmapLabel u)  = text "b" <> pprUnique u <> pp_cSEP <> ptext (sLit "btm")
--- Some bitsmaps for tuple constructors have a numeric tag (e.g. '7')
+-- Some bitmaps for tuple constructors have a numeric tag (e.g. '7')
 -- until that gets resolved we'll just force them to start
 -- with a letter so the label will be legal assmbly code.
+   
+pprCLbl (InternalLabel lbl) = pprCLbl lbl <> pp_cSEP <> ptext (sLit "internal")
 
 
 pprCLbl (CmmLabel _ str CmmCode)        = ftext str

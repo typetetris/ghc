@@ -26,7 +26,7 @@ module LlvmCodeGen.Base (
 
         cmmToLlvmType, widthToLlvmFloat, widthToLlvmInt, llvmFunTy,
         llvmFunSig, llvmStdFunAttrs, llvmFunAlign, llvmInfAlign,
-        llvmPtrBits, mkLlvmFunc, tysToParams,
+        llvmPtrBits, mkLlvmFunc, mkLlvmFuncAlias, tysToParams,
 
         strCLabel_llvm, strDisplayName_llvm, strProcedureName_llvm,
         getGlobalPtr, generateAliases,
@@ -136,6 +136,19 @@ mkLlvmFunc live lbl link sec blks
        dflags <- getDynFlags
        let funArgs = map (fsLit . Outp.showSDoc dflags . ppPlainName) (llvmFunArgs dflags live)
        return $ LlvmFunction funDec funArgs llvmStdFunAttrs sec blks
+
+-- | Create an alias to a Haskell function in LLVM
+-- The alias has the same alignment and section as the aliasee but
+-- with different linkage
+mkLlvmFuncAlias :: LiveGlobalRegs -> CLabel -> LlvmLinkageType -> LlvmFunction
+                -> LlvmM LMGlobal
+mkLlvmFuncAlias live aliasLbl link func
+  = do aliasLbl' <- strCLabel_llvm aliasLbl
+       let funcType = LMFunction (funcDecl func)
+           decl = funcDecl func
+           aliaseeVar = LMGlobalVar (decName decl) (LMPointer funcType) (funcLinkage decl) (funcSect func) (funcAlign decl) Global
+           aliasVar = LMGlobalVar aliasLbl' (LMPointer funcType) link Nothing Nothing Alias
+       return $ LMGlobal aliasVar (Just $ LMStaticPointer aliaseeVar)
 
 -- | Alignment to use for functions
 llvmFunAlign :: DynFlags -> LMAlign
