@@ -31,7 +31,7 @@ import UniqSupply
 import Unique
 
 import Data.List ( nub )
-import Data.Maybe ( catMaybes )
+import Data.Maybe ( catMaybes, fromMaybe )
 
 type LlvmStatements = OrdList LlvmStatement
 
@@ -564,7 +564,10 @@ genJump :: CmmExpr -> [GlobalReg] -> LlvmM StmtData
 
 -- Call to known function
 genJump (CmmLit (CmmLabel lbl)) live = do
-    (vf, stmts, top) <- getHsFunc live lbl
+    thisPkg <- thisPackage `fmap` getDynFlags
+    -- Use internal label if available
+    let lbl' = fromMaybe lbl $ toInternalLbl thisPkg lbl
+    (vf, stmts, top) <- getHsFunc live lbl'
     (stgRegs, stgStmts) <- funEpilogue live
     let s1  = Expr $ Call TailCall vf stgRegs llvmStdFunAttrs
     let s2  = Return Nothing

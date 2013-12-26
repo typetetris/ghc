@@ -102,6 +102,7 @@ module CLabel (
 
         -- * Conversions
         toClosureLbl, toSlowEntryLbl, toEntryLbl, toInfoLbl, toRednCountsLbl, hasHaskellName,
+        toInternalLbl,
 
         pprCLabel
     ) where
@@ -587,6 +588,16 @@ toRednCountsLbl = fmap mkRednCountsLabel . hasHaskellName
 hasHaskellName :: CLabel -> Maybe Name
 hasHaskellName (IdLabel n _ _) = Just n
 hasHaskellName _               = Nothing
+
+-- | Potentially convert a reference to a Haskell function to a
+-- reference to its internal label
+toInternalLbl :: PackageId -> CLabel -> Maybe CLabel
+toInternalLbl thisPkg lbl@(IdLabel name _ _)
+  | Just pkg <- fmap modulePackageId (nameModule_maybe name),
+    pkg == thisPkg = Just (InternalLabel lbl)
+toInternalLbl thisPkg lbl@(RtsLabel _)
+  | thisPkg == rtsPackageId = Just (InternalLabel lbl)
+toInternalLbl _ _ = Nothing
 
 -- -----------------------------------------------------------------------------
 -- Does a CLabel's referent itself refer to a CAF?
