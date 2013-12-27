@@ -625,6 +625,9 @@ data LlvmLinkageType
   | External
   -- | Symbol is private to the module and should not appear in the symbol table
   | Private
+  -- | Symbol is private to the module and will be elided by the linker when
+  -- producing the final image (executable or shared library)
+  | LinkerPrivate
   deriving (Eq)
 
 instance Outputable LlvmLinkageType where
@@ -639,6 +642,7 @@ instance Outputable LlvmLinkageType where
   ppr ExternallyVisible = empty
   ppr External          = text "external"
   ppr Private           = text "private"
+  ppr LinkerPrivate     = text "linker_private"
 
 -- -----------------------------------------------------------------------------
 -- * LLVM Operations
