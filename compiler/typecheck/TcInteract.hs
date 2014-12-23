@@ -14,7 +14,7 @@ import VarSet
 import Type
 import Kind (isKind, isConstraintKind )
 import Unify
-import InstEnv( lookupInstEnv, instanceDFunId )
+import InstEnv( DFunInstType, lookupInstEnv, instanceDFunId )
 import CoAxiom(sfInteractTop, sfInteractInert)
 
 import Var
@@ -2033,20 +2033,16 @@ matchClassInst inerts clas tys loc
    where
      pred = mkClassPred clas tys
 
-     match_one :: DFunId -> [Maybe TcType] -> TcS LookupInstResult
+     match_one :: DFunId -> [DFunInstType] -> TcS LookupInstResult
                   -- See Note [DFunInstType: instantiating types] in InstEnv
      match_one dfun_id mb_inst_tys
        = do { checkWellStagedDFun pred dfun_id loc
-            ; (tys, dfun_phi) <- instDFunType dfun_id mb_inst_tys
-            ; let (theta, _) = tcSplitPhiTy dfun_phi
-            ; if null theta then
-                  return (GenInst [] (EvDFunApp dfun_id tys []))
-              else do
-            { evc_vars <- instDFunConstraints loc theta
+            ; (tys, theta) <- instDFunType dfun_id mb_inst_tys
+            ; evc_vars <- mapM (newWantedEvVar loc) theta
             ; let new_ev_vars = freshGoals evc_vars
                       -- new_ev_vars are only the real new variables that can be emitted
                   dfun_app = EvDFunApp dfun_id tys (map (ctEvTerm . fst) evc_vars)
-            ; return $ GenInst new_ev_vars dfun_app } }
+            ; return $ GenInst new_ev_vars dfun_app }
 
      unifiable_givens :: Cts
      unifiable_givens = filterBag matchable $
