@@ -541,7 +541,7 @@ then
             AC_MSG_WARN(unexpected output $res)
         fi
     else
-        AC_MSG_RESULT(failed to compile, assuming no)
+        AC_MSG_RESULT(test failed to compile assuming stage0 is unaffected)
     fi
 fi
 AC_SUBST([GHC_LLVM_AFFECTED_BY_9439])
