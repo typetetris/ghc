@@ -24,7 +24,8 @@ import Hoopl
 import DynFlags
 import FastString
 import ForeignCall
-import Outputable
+import Outputable hiding (panic, pprPanic)
+import qualified Outputable
 import Platform
 import OrdList
 import UniqSupply
@@ -233,11 +234,10 @@ genCall (PrimTarget (MO_AtomicRead _)) [dst] [addr] = do
 genCall t@(PrimTarget op) [] args
  | Just align <- machOpMemcpyishAlign op = do
     dflags <- getDynFlags
-    let (args, alignVal) = splitAlignVal args'
-        isVolTy = [i1]
+    let isVolTy = [i1]
         isVolVal = [mkIntLit i1 0]
-        argTy | op == MO_Memset = [i8Ptr, i8,    llvmWord dflags, i32] ++ isVolTy
-              | otherwise       = [i8Ptr, i8Ptr, llvmWord dflags, i32] ++ isVolTy
+        argTy | MO_Memset _ <- op = [i8Ptr, i8,    llvmWord dflags, i32] ++ isVolTy
+              | otherwise         = [i8Ptr, i8Ptr, llvmWord dflags, i32] ++ isVolTy
         funTy = \name -> LMFunction $ LlvmFunctionDecl name ExternallyVisible
                              CC_Ccc LMVoid FixedArgs (tysToParams argTy) Nothing
 
