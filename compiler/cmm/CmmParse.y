@@ -995,7 +995,9 @@ callishMachOps = listToUFM $
   where
     memcpyLikeTweakArgs :: (Int -> CallishMachOp) -> [CmmExpr] -> (CallishMachOp, [CmmExpr])
     memcpyLikeTweakArgs op [] = pgmError "memcpy-like function requires at least one argument"
-    memcpyLikeTweakArgs op args@(_:_) = (op align, args')
+    memcpyLikeTweakArgs op args@(_:_) =
+        -- Force alignment with result to ensure pprPgmError fires
+        align `seq` (op align, args')
       where
         args' = init args
         align = case last args of
