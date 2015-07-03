@@ -109,7 +109,7 @@ test('T1969',
       # Use `+RTS -G1` for more stable residency measurements. Note [residency].
       # Only 64-bit as we don't have a good 32-bit test environment at the moment
       when(wordsize(64), extra_hc_opts('+RTS -G1 -RTS'))
-     ],
+      ],
      compile,
      [''])
 
@@ -172,10 +172,11 @@ test('T3294',
             # 2014-17-07: 2671595512 (amd64/Linux) (round-about update)
             # 2014-09-10: 2709595808 (amd64/Linux) post-AMP cleanup
       conf_3294,
+
       # Use `+RTS -G1` for more stable residency measurements. Note [residency].
       # Only 64-bit as we don't have a good 32-bit test environment at the moment
       when(wordsize(64), extra_hc_opts('+RTS -G1 -RTS'))
-     ],
+      ],
      compile,
      [])
 
@@ -247,7 +248,7 @@ test('T4801',
        # Use `+RTS -G1` for more stable residency measurements. Note [residency].
        # Only 64-bit as we don't have a good 32-bit test environment at the moment
        when(wordsize(64), extra_hc_opts('+RTS -G1 -RTS'))
-      ],
+       ],
      compile,
      [''])
 
@@ -325,7 +326,7 @@ test('T3064',
 #            # (amd64/Linux)         (19/09/2014): 18744992, unknown
 #            # (amd64/Linux)         2014-10-13:   13251728, Stricter seqDmdType
 
-       only_ways(['normal'])
+       only_ways(['normal']),
 
        # Use `+RTS -G1` for more stable residency measurements. Note [residency].
        # Only 64-bit as we don't have a good 32-bit test environment at the moment
