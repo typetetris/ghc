@@ -104,13 +104,16 @@ test('T1969',
              # 10/09/2014 630299456 (x86_64/Linux) post-AMP-cleanup
       only_ways(['normal']),
 
-      extra_hc_opts('-dcore-lint -static')
+      extra_hc_opts('-dcore-lint -static'),
           # Leave -dcore-lint on for this one test, so that we have something
           # that will catch a regression in -dcore-lint performance.
-      ],
+
+      # Use `+RTS -G1` for more stable residency measurements. Note [residency].
+      # Only 64-bit as we don't have a good 32-bit test environment at the moment
+      when(wordsize(64), extra_hc_opts('+RTS -G1 -RTS'))
+     ],
      compile,
-     # Use `+RTS -G1` for more stable residency measurements. Note [residency].
-     ['+RTS -G1'])
+     [''])
 
 # This one tests for the space leak in the native code generator,
 # where it holds onto the entire asm output until the end.  The space
@@ -170,11 +173,13 @@ test('T3294',
             # 12/03/2014: 2705289664 (amd64/Linux) (more call arity improvements)
             # 2014-17-07: 2671595512 (amd64/Linux) (round-about update)
             # 2014-09-10: 2709595808 (amd64/Linux) post-AMP cleanup
-      conf_3294
-      ],
+      conf_3294,
+      # Use `+RTS -G1` for more stable residency measurements. Note [residency].
+      # Only 64-bit as we don't have a good 32-bit test environment at the moment
+      when(wordsize(64), extra_hc_opts('+RTS -G1 -RTS'))
+     ],
      compile,
-     # Use `+RTS -G1` for more stable residency measurements. Note [residency].
-     ['+RTS -G1'])
+     [])
 
 test('T4801',
      [ # expect_broken(5224),
@@ -239,11 +244,14 @@ test('T4801',
 #               # 10/09/2014: 19296544, 10 (post-AMP-cleanup)
 #               # 14/09/2014: 19585456, 15 (adapt to Phab CI env)
        only_ways(['normal']),
-       extra_hc_opts('-static')
+       extra_hc_opts('-static'),
+
+       # Use `+RTS -G1` for more stable residency measurements. Note [residency].
+       # Only 64-bit as we don't have a good 32-bit test environment at the moment
+       when(wordsize(64), extra_hc_opts('+RTS -G1 -RTS'))
       ],
      compile,
-     # Use `+RTS -G1` for more stable residency measurements. Note [residency].
-     ['+RTS -G1'])
+     [])
 
 test('T3064',
      [compiler_stats_num_field('peak_megabytes_allocated',# Note [residency]
@@ -321,10 +329,13 @@ test('T3064',
 #            # (amd64/Linux)         2014-10-13:   13251728, Stricter seqDmdType
 
        only_ways(['normal'])
+
+       # Use `+RTS -G1` for more stable residency measurements. Note [residency].
+       # Only 64-bit as we don't have a good 32-bit test environment at the moment
+       when(wordsize(64), extra_hc_opts('+RTS -G1 -RTS'))
       ],
      compile,
-     # Use `+RTS -G1` for more stable residency measurements. Note [residency].
-     ['+RTS -G1'])
+     [''])
 
 test('T4007',
      normal,
@@ -591,10 +602,13 @@ test('T9675',
           # 2014-10-13    544489040
           ,(wordsize(32), 250000000, 10)
           ]),
+
+       # Use `+RTS -G1` for more stable residency measurements. Note [residency].
+       # Only 64-bit as we don't have a good 32-bit test environment at the moment
+       when(wordsize(64), extra_hc_opts('+RTS -G1 -RTS'))
       ],
      compile,
-     # Use `+RTS -G1` for more stable residency measurements. Note [residency].
-     ['+RTS -G1'])
+     [''])
 
 test('T9872a',
      [ only_ways(['normal']),
