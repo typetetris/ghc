@@ -29,14 +29,16 @@ setTestOpts(no_lint)
 
 test('T1969',
      [compiler_stats_num_field('peak_megabytes_allocated', # Note [residency]
-          [(wordsize(32), 17, 15),
+          [(wordsize(32), 20, 15),
              # 2010-05-17 14 (x86/Windows)
              #            15 (x86/OS X)
              #            19 (x86/OS X)
              # 2013-02-10 13 (x86/Windows)
              # 2013-02-10 14 (x86/OSX)
              # 2013-11-13 17 (x86/Windows, 64bit machine)
-           (wordsize(64), 30, 20)]),
+             # 2015-06-03 20 (inferred from 64-bit result, needs testing)
+                             use +RTS -G1
+           (wordsize(64), 41, 20)]),
              #            28 (amd64/Linux)
              #            34 (amd64/Linux)
              # 2012-09-20 23 (amd64/Linux)
@@ -46,6 +48,7 @@ test('T1969',
              # 2014-09-10 29 (amd64/Linux) post-AMP-cleanup
              # 2013-09-11 30, 10 (amd64/Linux)
              # 2013-09-11 30, 15 (adapt to Phab CI)
+             # 2015-06-03 41, (amd64/Linux) use +RTS -G1
       compiler_stats_num_field('max_bytes_used',
           [(platform('i386-unknown-mingw32'), 5719436, 20),
                                  # 2010-05-17 5717704 (x86/Windows)
@@ -243,14 +246,14 @@ test('T4801',
      ['+RTS -G1'])
 
 test('T3064',
-     [# expect_broken( 3064 ),
-      compiler_stats_num_field('peak_megabytes_allocated',# Note [residency]
-          [(wordsize(32), 16, 20),
+     [compiler_stats_num_field('peak_megabytes_allocated',# Note [residency]
+          [(wordsize(32), 38, 20),
             # expected value: 14 (x86/Linux 28-06-2012):
             # 2013-11-13:     18 (x86/Windows, 64bit machine)
             # 2014-01-22:     23 (x86/Linux)
             # 2014-12-22:     23 (x86/Linux) death to silent superclasses
-           (wordsize(64), 32, 20)]),
+            # 2015-05-03:     38 (inferred from 64-bit) use +RTS -G1
+           (wordsize(64), 54, 20)]),
             # (amd64/Linux):            18
             # (amd64/Linux) 2012-02-07: 26
             # (amd64/Linux) 2013-02-12: 23; increased range to 10%
@@ -263,6 +266,7 @@ test('T3064',
             # (amd64/Linux) 2014-10-13: 38: Stricter seqDmdType
             # (amd64/Linux) 2014-12-22: 27: death to silent superclasses
             # (amd64/Linux) 2015-01-22: 32: Varies from 30 to 34, at least here.
+            # (amd64/Linux) 2015-06-03: 54: use +RTS -G1
 
       compiler_stats_num_field('bytes allocated',
           [(wordsize(32), 122836340, 10),
