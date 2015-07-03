@@ -179,7 +179,7 @@ test('T3294',
       when(wordsize(64), extra_hc_opts('+RTS -G1 -RTS'))
       ],
      compile,
-     [])
+     [''])
 
 test('T4801',
      [ # expect_broken(5224),
