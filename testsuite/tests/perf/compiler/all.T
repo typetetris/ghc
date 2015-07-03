@@ -29,15 +29,13 @@ setTestOpts(no_lint)
 
 test('T1969',
      [compiler_stats_num_field('peak_megabytes_allocated', # Note [residency]
-          [(wordsize(32), 20, 15),
+          [(wordsize(32), 17, 15),
              # 2010-05-17 14 (x86/Windows)
              #            15 (x86/OS X)
              #            19 (x86/OS X)
              # 2013-02-10 13 (x86/Windows)
              # 2013-02-10 14 (x86/OSX)
              # 2013-11-13 17 (x86/Windows, 64bit machine)
-             # 2015-06-03 20 (inferred from 64-bit result, needs testing)
-                             use +RTS -G1
            (wordsize(64), 41, 20)]),
              #            28 (amd64/Linux)
              #            34 (amd64/Linux)
@@ -251,16 +249,15 @@ test('T4801',
        when(wordsize(64), extra_hc_opts('+RTS -G1 -RTS'))
       ],
      compile,
-     [])
+     [''])
 
 test('T3064',
      [compiler_stats_num_field('peak_megabytes_allocated',# Note [residency]
-          [(wordsize(32), 38, 20),
+          [(wordsize(32), 16, 20),
             # expected value: 14 (x86/Linux 28-06-2012):
             # 2013-11-13:     18 (x86/Windows, 64bit machine)
             # 2014-01-22:     23 (x86/Linux)
             # 2014-12-22:     23 (x86/Linux) death to silent superclasses
-            # 2015-05-03:     38 (inferred from 64-bit) use +RTS -G1
            (wordsize(64), 54, 20)]),
             # (amd64/Linux):            18
             # (amd64/Linux) 2012-02-07: 26
