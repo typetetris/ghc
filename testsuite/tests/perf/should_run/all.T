@@ -20,7 +20,8 @@ test('T3586',
       only_ways(['normal'])
       ],
      compile_and_run,
-     ['-O'])
+     # Use `+RTS -G1` for more stable residency measurements. Note [residency] in tests/perf/compiler/all.T.
+     ['-O', '+RTS -G1'])
 
 test('T4830',
      [stats_num_field('bytes allocated',
@@ -65,7 +66,8 @@ test('lazy-bs-alloc',
       ],
       # use a suitably big file, without bloating the repo with a new one:
      compile_and_run,
-     ['-O'])
+     # Use `+RTS -G1` for more stable residency measurements. Note [residency] in tests/perf/compiler/all.T.
+     ['-O', '+RTS -G1'])
 
 test('T876',
      [stats_num_field('bytes allocated',

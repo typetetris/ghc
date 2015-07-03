@@ -106,7 +106,8 @@ test('T1969',
           # that will catch a regression in -dcore-lint performance.
       ],
      compile,
-     [''])
+     # Use `+RTS -G1` for more stable residency measurements. Note [residency].
+     ['+RTS -G1'])
 
 # This one tests for the space leak in the native code generator,
 # where it holds onto the entire asm output until the end.  The space
@@ -169,7 +170,8 @@ test('T3294',
       conf_3294
       ],
      compile,
-     [''])
+     # Use `+RTS -G1` for more stable residency measurements. Note [residency].
+     ['+RTS -G1'])
 
 test('T4801',
      [ # expect_broken(5224),
@@ -237,7 +239,8 @@ test('T4801',
        extra_hc_opts('-static')
       ],
      compile,
-     [''])
+     # Use `+RTS -G1` for more stable residency measurements. Note [residency].
+     ['+RTS -G1'])
 
 test('T3064',
      [# expect_broken( 3064 ),
@@ -316,7 +319,8 @@ test('T3064',
        only_ways(['normal'])
       ],
      compile,
-     [''])
+     # Use `+RTS -G1` for more stable residency measurements. Note [residency].
+     ['+RTS -G1'])
 
 test('T4007',
      normal,
@@ -559,21 +563,23 @@ test('T9020',
 
 test('T9675',
      [ only_ways(['optasm']),
-       compiler_stats_num_field('max_bytes_used',
-          [(wordsize(64), 22220552, 25),
+       compiler_stats_num_field('max_bytes_used', # Note [residency]
+          [(wordsize(64), 28056344, 25),
           # 2014-10-13    29596552
           # 2014-10-13    26570896   seq the DmdEnv in seqDmdType as well
           # 2014-10-13    18582472   different machines giving different results..
           # 2014-10-13    22220552   use the mean
+          # 2015-06-21    28056344   switch to `+RTS -G1`
            (wordsize(32), 11220552, 25)
           ]),
-       compiler_stats_num_field('peak_megabytes_allocated',
-          [(wordsize(64), 44, 15),
+       compiler_stats_num_field('peak_megabytes_allocated', # Note [residency]
+          [(wordsize(64), 105, 15),
           # 2014-10-13    66
           # 2014-10-13    58         seq the DmdEnv in seqDmdType as well
           # 2014-10-13    49         different machines giving different results...
           # 2014-10-13    53         use the mean
-          # 2014-06-15    44         reduced for some reason
+          # 2015-06-15    44         reduced for some reason
+          # 2015-06-21    105        switch to `+RTS -G1`
             (wordsize(32), 25, 15)
           ]),
        compiler_stats_num_field('bytes allocated',
@@ -583,7 +589,8 @@ test('T9675',
           ]),
       ],
      compile,
-     [''])
+     # Use `+RTS -G1` for more stable residency measurements. Note [residency].
+     ['+RTS -G1'])
 
 test('T9872a',
      [ only_ways(['normal']),
