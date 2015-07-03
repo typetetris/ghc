@@ -82,7 +82,7 @@ test('T1969',
              # 2013-02-10 322937684 (x86/OSX)
              # 2014-01-22 316103268 (x86/Linux)
              # 2014-06-29 303300692 (x86/Linux)
-           (wordsize(64), 630299456, 5)]),
+           (wordsize(64), 581460896, 5)]),
              # 17/11/2009 434845560 (amd64/Linux)
              # 08/12/2009 459776680 (amd64/Linux)
              # 17/05/2010 519377728 (amd64/Linux)
@@ -100,6 +100,7 @@ test('T1969',
              # 10/02/2014 660922376 (x86_64/Linux) call arity analysis
              # 17/07/2014 651626680 (x86_64/Linux) roundabout update
              # 10/09/2014 630299456 (x86_64/Linux) post-AMP-cleanup
+             # 03/06/2015 581460896 (x86_64/Linux) use +RTS -G1
       only_ways(['normal']),
 
       extra_hc_opts('-dcore-lint -static'),
