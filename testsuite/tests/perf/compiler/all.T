@@ -568,13 +568,13 @@ test('T9020',
 test('T9675',
      [ only_ways(['optasm']),
        compiler_stats_num_field('max_bytes_used', # Note [residency]
-          [(wordsize(64), 28056344, 25),
+          [(wordsize(64), 28056344, 15),
           # 2014-10-13    29596552
           # 2014-10-13    26570896   seq the DmdEnv in seqDmdType as well
           # 2014-10-13    18582472   different machines giving different results..
           # 2014-10-13    22220552   use the mean
-          # 2015-06-21    28056344   switch to `+RTS -G1`
-           (wordsize(32), 11220552, 25)
+          # 2015-06-21    28056344   switch to `+RTS -G1`, tighten bound to 15%
+           (wordsize(32), 11220552, 15)
           ]),
        compiler_stats_num_field('peak_megabytes_allocated', # Note [residency]
           [(wordsize(64), 105, 15),
