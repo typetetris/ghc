@@ -409,7 +409,8 @@ for_ = flip traverse_
 -- As of base 4.8.0.0, 'mapM_' is just 'traverse_', specialized to
 -- 'Monad'.
 mapM_ :: (Foldable t, Monad m) => (a -> m b) -> t a -> m ()
-mapM_ f= foldr ((>>) . f) (return ())
+mapM_ = traverse_
+{-# INLINE mapM_ #-}
 
 -- | 'forM_' is 'mapM_' with its arguments flipped. For a version that
 -- doesn't ignore the results see 'Data.Traversable.forM'.
