@@ -1223,7 +1223,7 @@ a `iShiftRL#` b | isTrue# (b >=# WORD_SIZE_IN_BITS#) = 0#
 
 -- Rules for C strings (the functions themselves are now in GHC.CString)
 {-# RULES
-"unpack"       [~1] forall a   . unpackCString# a             = build (unpackFoldrCString# a)
+"unpack"       [~1] forall a   . unpackCString# a             = cheapBuild (unpackFoldrCString# a)
 "unpack-list"  [1]  forall a   . unpackFoldrCString# a (:) [] = unpackCString# a
 "unpack-append"     forall a n . unpackFoldrCString# a (:) n  = unpackAppendCString# a n
 
