@@ -106,6 +106,10 @@ char *EventDesc[] = {
   [EVENT_TASK_MIGRATE]        = "Task migrate",
   [EVENT_TASK_DELETE]         = "Task delete",
   [EVENT_HACK_BUG_T9003]      = "Empty event for bug #9003",
+  [EVENT_HEAP_PROF_BEGIN]     = "Start of heap profile",
+  [EVENT_HEAP_PROF_COST_CENTRE]  = "Cost center definition",
+  [EVENT_HEAP_PROF_SAMPLE_BEGIN] = "Start of heap profile sample",
+  [EVENT_HEAP_PROF_SAMPLE]    = "Heap profile sample",
 };
 
 // Event type.
@@ -162,6 +166,15 @@ static inline void postBuf(EventsBuf *eb, StgWord8 *buf, nat size)
 {
     memcpy(eb->pos, buf, size);
     eb->pos += size;
+}
+
+/* Post a null-terminated string to the event log.
+ * It is the caller's responsibility to ensure that there is
+ * enough room for strlen(buf)+1 bytes.
+ */
+static inline void postString(EventsBuf *eb, const char *buf)
+{
+    eb->pos = (StgInt8 *) strncpy((char *)eb->pos, buf, eb->begin + eb->size - eb->pos);
 }
 
 static inline StgWord64 time_ns(void)
@@ -426,6 +439,22 @@ initEventLogging(void)
             break;
 
         case EVENT_HACK_BUG_T9003:
+            eventTypes[t].size = 0;
+            break;
+
+        case EVENT_HEAP_PROF_BEGIN:
+            eventTypes[t].size = 0;
+            break;
+
+        case EVENT_HEAP_PROF_COST_CENTRE:
+            eventTypes[t].size = 0;
+            break;
+
+        case EVENT_HEAP_PROF_SAMPLE_BEGIN:
+            eventTypes[t].size = 8;
+            break;
+
+        case EVENT_HEAP_PROF_SAMPLE:
             eventTypes[t].size = 0;
             break;
 
@@ -1097,6 +1126,131 @@ void postBlockMarker (EventsBuf *eb)
     postWord64(eb,0);
     postCapNo(eb, eb->capno);
 }
+
+typedef enum {
+    HEAP_PROF_BREAKDOWN_COST_CENTRE = 0x1,
+    HEAP_PROF_BREAKDOWN_MODULE,
+    HEAP_PROF_BREAKDOWN_CLOSURE_DESCR,
+    HEAP_PROF_BREAKDOWN_TYPE_DESCR,
+    HEAP_PROF_BREAKDOWN_RETAINER,
+    HEAP_PROF_BREAKDOWN_BIOGRAPHY,
+} HeapProfBreakdown;
+
+static HeapProfBreakdown getHeapProfBreakdown(void)
+{
+    switch (RtsFlags.ProfFlags.doHeapProfile) {
+    case HEAP_BY_CCS:
+        return HEAP_PROF_BREAKDOWN_COST_CENTRE;
+    case HEAP_BY_MOD:
+        return HEAP_PROF_BREAKDOWN_MODULE;
+    case HEAP_BY_DESCR:
+        return HEAP_PROF_BREAKDOWN_CLOSURE_DESCR;
+    case HEAP_BY_TYPE:
+        return HEAP_PROF_BREAKDOWN_TYPE_DESCR;
+    case HEAP_BY_RETAINER:
+        return HEAP_PROF_BREAKDOWN_RETAINER;
+    case HEAP_BY_LDV:
+        return HEAP_PROF_BREAKDOWN_BIOGRAPHY;
+    default:
+        barf("getHeapProfBreakdown called with until heap profiling mode.");
+    }
+}
+
+void postHeapProfBegin(StgWord8 profile_id)
+{
+    ACQUIRE_LOCK(&eventBufMutex);
+    PROFILING_FLAGS *flags = &RtsFlags.ProfFlags;
+    StgWord modSelector_len = strlen(flags->modSelector);
+    StgWord descrSelector_len = strlen(flags->descrSelector);
+    StgWord typeSelector_len = strlen(flags->typeSelector);
+    StgWord ccSelector_len = strlen(flags->ccSelector);
+    StgWord ccsSelector_len = strlen(flags->ccsSelector);
+    StgWord retainerSelector_len = strlen(flags->retainerSelector);
+    StgWord bioSelector_len = strlen(flags->bioSelector);
+    StgWord len = 1+8+4+4 + modSelector_len + descrSelector_len +
+        typeSelector_len + ccSelector_len + ccsSelector_len +
+        retainerSelector_len + bioSelector_len + 7;
+    ensureRoomForVariableEvent(&eventBuf, len);
+    postEventHeader(&eventBuf, EVENT_HEAP_PROF_BEGIN);
+    postWord8(&eventBuf, profile_id);
+    postWord64(&eventBuf, TimeToNS(flags->heapProfileInterval));
+    postWord32(&eventBuf, getHeapProfBreakdown());
+    postString(&eventBuf, flags->modSelector);
+    postString(&eventBuf, flags->descrSelector);
+    postString(&eventBuf, flags->typeSelector);
+    postString(&eventBuf, flags->ccSelector);
+    postString(&eventBuf, flags->ccsSelector);
+    postString(&eventBuf, flags->retainerSelector);
+    postString(&eventBuf, flags->bioSelector);
+    RELEASE_LOCK(&eventBufMutex);
+}
+
+void postHeapProfSampleBegin(StgInt era)
+{
+    ACQUIRE_LOCK(&eventBufMutex);
+    ensureRoomForEvent(&eventBuf, EVENT_HEAP_PROF_SAMPLE_BEGIN);
+    postEventHeader(&eventBuf, EVENT_HEAP_PROF_SAMPLE_BEGIN);
+    postWord32(&eventBuf, era);
+    RELEASE_LOCK(&eventBufMutex);
+}
+
+void postHeapProfSampleString(StgWord8 profile_id,
+                              const char *label,
+                              StgWord64 residency)
+{
+    ACQUIRE_LOCK(&eventBufMutex);
+    StgWord label_len = strlen(label);
+    StgWord len = 1+8+label_len+1;
+    ensureRoomForVariableEvent(&eventBuf, len);
+    postEventHeader(&eventBuf, EVENT_HEAP_PROF_SAMPLE);
+    postWord8(&eventBuf, profile_id);
+    postWord64(&eventBuf, residency);
+    postString(&eventBuf, label);
+    RELEASE_LOCK(&eventBufMutex);
+}
+
+#ifdef PROFILING
+void postHeapProfCostCentre(StgWord32 ccID,
+                            const char *label,
+                            const char *module,
+                            const char *srcloc,
+                            StgBool is_caf)
+{
+    ACQUIRE_LOCK(&eventBufMutex);
+    StgWord label_len = strlen(label);
+    StgWord module_len = strlen(module);
+    StgWord srcloc_len = strlen(srcloc);
+    StgWord len = 4+label_len+module_len+srcloc_len+3+1;
+    ensureRoomForVariableEvent(&eventBuf, len);
+    postEventHeader(&eventBuf, EVENT_HEAP_PROF_COST_CENTRE);
+    postWord32(&eventBuf, ccID);
+    postString(&eventBuf, label);
+    postString(&eventBuf, module);
+    postString(&eventBuf, srcloc);
+    postWord8(&eventBuf, is_caf);
+    RELEASE_LOCK(&eventBufMutex);
+}
+
+void postHeapProfSampleCostCentre(StgWord8 profile_id,
+                                  CostCentreStack *stack,
+                                  StgWord64 residency)
+{
+    ACQUIRE_LOCK(&eventBufMutex);
+    StgWord depth = 0;
+    CostCentreStack *ccs;
+    for (ccs = stack; ccs != NULL && ccs != CCS_MAIN; ccs = ccs->prevStack)
+        depth++;
+
+    StgWord len = 1+8+1+depth*4;
+    ensureRoomForVariableEvent(&eventBuf, len);
+    postEventHeader(&eventBuf, EVENT_HEAP_PROF_SAMPLE);
+    postWord8(&eventBuf, profile_id);
+    postWord64(&eventBuf, residency);
+    for (ccs = stack; ccs != NULL && ccs != CCS_MAIN; ccs = ccs->prevStack)
+        postWord32(&eventBuf, ccs->cc->ccID);
+    RELEASE_LOCK(&eventBufMutex);
+}
+#endif /* PROFILING */
 
 void printAndClearEventBuf (EventsBuf *ebuf)
 {

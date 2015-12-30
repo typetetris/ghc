@@ -19,6 +19,7 @@
 #include "LdvProfile.h"
 #include "Arena.h"
 #include "Printer.h"
+#include "Trace.h"
 #include "sm/GCThread.h"
 
 #include <string.h>
@@ -402,7 +403,7 @@ initHeapProfiling(void)
     }
 
     // max_era = 2^LDV_SHIFT
-        max_era = 1 << LDV_SHIFT;
+    max_era = 1 << LDV_SHIFT;
 
     n_censuses = 32;
     censuses = stgMallocBytes(sizeof(Census) * n_censuses, "initHeapProfiling");
@@ -439,6 +440,7 @@ initHeapProfiling(void)
     }
 #endif
 
+    traceHeapProfBegin(0);
     return 0;
 }
 
@@ -746,10 +748,12 @@ dumpCensus( Census *census )
     long count;
 
     printSample(rtsTrue, census->time);
+    traceHeapProfSampleBegin(era);
 
 #ifdef PROFILING
     if (RtsFlags.ProfFlags.doHeapProfile == HEAP_BY_LDV) {
-      fprintf(hp_file, "VOID\t%lu\n", (unsigned long)(census->void_total) * sizeof(W_));
+        fprintf(hp_file, "VOID\t%lu\n",
+                (unsigned long)(census->void_total) * sizeof(W_));
         fprintf(hp_file, "LAG\t%lu\n",
                 (unsigned long)(census->not_used - census->void_total) * sizeof(W_));
         fprintf(hp_file, "USE\t%lu\n",
@@ -790,6 +794,7 @@ dumpCensus( Census *census )
         switch (RtsFlags.ProfFlags.doHeapProfile) {
         case HEAP_BY_CLOSURE_TYPE:
             fprintf(hp_file, "%s", (char *)ctr->identity);
+            traceHeapProfSampleString(0, (char *)ctr->identity, count * sizeof(W_));
             break;
         }
 #endif
@@ -798,11 +803,13 @@ dumpCensus( Census *census )
         switch (RtsFlags.ProfFlags.doHeapProfile) {
         case HEAP_BY_CCS:
             fprint_ccs(hp_file, (CostCentreStack *)ctr->identity, RtsFlags.ProfFlags.ccsLength);
+            traceHeapProfSampleCostCentre(0, (CostCentreStack *)ctr->identity, count * sizeof(W_));
             break;
         case HEAP_BY_MOD:
         case HEAP_BY_DESCR:
         case HEAP_BY_TYPE:
             fprintf(hp_file, "%s", (char *)ctr->identity);
+            traceHeapProfSampleString(0, (char *)ctr->identity, count * sizeof(W_));
             break;
         case HEAP_BY_RETAINER:
         {
