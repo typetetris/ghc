@@ -374,6 +374,19 @@ printSample(rtsBool beginSample, StgDouble sampleValue)
     }
 }
 
+static void
+dumpCostCentresToEventLog(void)
+{
+#ifdef PROFILING
+    CostCentre *cc, *next;
+    for (cc = CC_LIST; cc != NULL; cc = next) {
+        next = cc->link;
+        traceHeapProfCostCentre(cc->ccID, cc->label, cc->module,
+                                cc->srcloc, cc->is_caf);
+    }
+#endif
+}
+
 /* --------------------------------------------------------------------------
  * Initialize the heap profilier
  * ----------------------------------------------------------------------- */
@@ -441,6 +454,8 @@ initHeapProfiling(void)
 #endif
 
     traceHeapProfBegin(0);
+    dumpCostCentresToEventLog();
+
     return 0;
 }
 
@@ -794,7 +809,8 @@ dumpCensus( Census *census )
         switch (RtsFlags.ProfFlags.doHeapProfile) {
         case HEAP_BY_CLOSURE_TYPE:
             fprintf(hp_file, "%s", (char *)ctr->identity);
-            traceHeapProfSampleString(0, (char *)ctr->identity, count * sizeof(W_));
+            traceHeapProfSampleString(0, (char *)ctr->identity,
+                                      count * sizeof(W_));
             break;
         }
 #endif
@@ -802,14 +818,17 @@ dumpCensus( Census *census )
 #ifdef PROFILING
         switch (RtsFlags.ProfFlags.doHeapProfile) {
         case HEAP_BY_CCS:
-            fprint_ccs(hp_file, (CostCentreStack *)ctr->identity, RtsFlags.ProfFlags.ccsLength);
-            traceHeapProfSampleCostCentre(0, (CostCentreStack *)ctr->identity, count * sizeof(W_));
+            fprint_ccs(hp_file, (CostCentreStack *)ctr->identity,
+                       RtsFlags.ProfFlags.ccsLength);
+            traceHeapProfSampleCostCentre(0, (CostCentreStack *)ctr->identity,
+                                          count * sizeof(W_));
             break;
         case HEAP_BY_MOD:
         case HEAP_BY_DESCR:
         case HEAP_BY_TYPE:
             fprintf(hp_file, "%s", (char *)ctr->identity);
-            traceHeapProfSampleString(0, (char *)ctr->identity, count * sizeof(W_));
+            traceHeapProfSampleString(0, (char *)ctr->identity,
+                                      count * sizeof(W_));
             break;
         case HEAP_BY_RETAINER:
         {

@@ -173,16 +173,17 @@
 
 /* Range 140 - 159 is reserved for Perf events. */
 
-#define EVENT_HEAP_PROF_BEGIN        100
-#define EVENT_HEAP_PROF_COST_CENTRE  101
-#define EVENT_HEAP_PROF_SAMPLE_BEGIN 102
-#define EVENT_HEAP_PROF_SAMPLE       103
+#define EVENT_HEAP_PROF_BEGIN              160
+#define EVENT_HEAP_PROF_COST_CENTRE        161
+#define EVENT_HEAP_PROF_SAMPLE_BEGIN       162
+#define EVENT_HEAP_PROF_SAMPLE_COST_CENTRE 163
+#define EVENT_HEAP_PROF_SAMPLE_STRING      164
 /*
  * The highest event code +1 that ghc itself emits. Note that some event
  * ranges higher than this are reserved but not currently emitted by ghc.
  * This must match the size of the EventDesc[] array in EventLog.c
  */
-#define NUM_GHC_EVENT_TAGS        104
+#define NUM_GHC_EVENT_TAGS        165
 
 #if 0  /* DEPRECATED EVENTS: */
 /* we don't actually need to record the thread, it's implicit */
