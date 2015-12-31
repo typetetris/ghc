@@ -22,7 +22,7 @@
 #
 # The ways currently defined.
 #
-ALL_WAYS=v p l debug dyn thr thr_l p_dyn debug_dyn thr_dyn thr_p_dyn thr_debug_dyn thr_p thr_debug debug_p thr_debug_p l_dyn thr_l_dyn
+ALL_WAYS=v p l debug dyn thr thr_l p_dyn p_l debug_dyn thr_dyn thr_p_dyn thr_debug_dyn thr_p thr_debug debug_p thr_debug_p l_dyn thr_l_dyn p_l thr_p_l
 
 #
 # The following ways currently are treated specially,
@@ -68,6 +68,10 @@ WAY_debug_HC_OPTS= -static -optc-DDEBUG -ticky -DTICKY_TICKY
 WAY_debug_p_NAME=debug profiled
 WAY_debug_p_HC_OPTS= -static -optc-DDEBUG -prof
 
+# Way 'p_l':
+WAY_p_l_NAME=profiling event logging
+WAY_p_l_HC_OPTS= -static -prof -eventlog
+
 # Way 'thr_debug':
 WAY_thr_debug_NAME=threaded debug
 WAY_thr_debug_HC_OPTS= -static -optc-DTHREADED_RTS -optc-DDEBUG
@@ -106,3 +110,6 @@ WAY_l_dyn_HC_OPTS= -fPIC -dynamic -eventlog
 WAY_thr_l_dyn_NAME=threaded event logging dynamic
 WAY_thr_l_dyn_HC_OPTS= -fPIC -dynamic -optc-DTHREADED_RTS -eventlog
 
+# Way 'thr_p_l':
+WAY_thr_p_l_NAME=threaded profiling event logging
+WAY_thr_p_l_HC_OPTS= -static -prof -optc-DTHREADED_RTS -eventlog
