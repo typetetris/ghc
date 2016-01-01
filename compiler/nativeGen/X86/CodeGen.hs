@@ -161,9 +161,9 @@ stmtToInstrs stmt = do
   dflags <- getDynFlags
   is32Bit <- is32BitPlatform
   case stmt of
-    CmmComment s   -> return (unitOL (COMMENT s))
-    CmmTick {}     -> return nilOL
-    CmmUnwind {}   -> return nilOL
+    CmmComment s      -> return (unitOL (COMMENT s))
+    CmmTick {}        -> return nilOL
+    CmmUnwind lbl _ _ -> return (unitOL (LABEL lbl))
 
     CmmAssign reg src
       | isFloatType ty         -> assignReg_FltCode format reg src

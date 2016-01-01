@@ -497,6 +497,9 @@ pprInstr (DELTA d)
 pprInstr (NEWBLOCK _)
    = panic "PprMach.pprInstr: NEWBLOCK"
 
+pprInstr (LABEL lbl)
+   = ppr (mkAsmTempLabel lbl) <> colon
+
 pprInstr (LDATA _ _)
    = panic "PprMach.pprInstr: LDATA"
 

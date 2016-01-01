@@ -12,15 +12,18 @@
 module Debug (
 
   DebugBlock(..), dblIsEntry,
-  UnwindTable, UnwindExpr(..),
   cmmDebugGen,
   cmmDebugLabels,
   cmmDebugLink,
-  debugToMap
+  debugToMap,
+
+  -- * Unwinding information
+  UnwindTable, UnwindPoints(..), UnwindExpr(..),
+  addDefaultUnwindings
 
   ) where
 
-import BlockId         ( blockLbl )
+import BlockId
 import CLabel
 import Cmm
 import CmmUtils
@@ -56,7 +59,7 @@ data DebugBlock =
   , dblPosition   :: !(Maybe Int)  -- ^ Output position relative to
                                    -- other blocks. @Nothing@ means
                                    -- the block was optimized out
-  , dblUnwind     :: !UnwindTable  -- ^ Unwind information
+  , dblUnwind     :: UnwindPoints  -- ^ Unwind information
   , dblBlocks     :: ![DebugBlock] -- ^ Nested blocks
   }
 
@@ -74,14 +77,17 @@ instance Outputable DebugBlock where
             (maybe empty ppr (dblSourceTick blk)) <+>
             (maybe (text "removed") ((text "pos " <>) . ppr)
                    (dblPosition blk)) <+>
-            pprUwMap (dblUnwind blk) $$
+            pprUwPts (dblUnwind blk) $$
             (if null (dblBlocks blk) then empty else ppr (dblBlocks blk))
-    where pprUw (g, expr) = ppr g <> char '=' <> ppr expr
-          pprUwMap = braces . hsep . punctuate comma . map pprUw . Map.toList
+    where pprUwPts (UnwindPoints pts) = hsep $ punctuate comma $ map pprUwPt pts
+          pprUwPt (lbl, uws) =
+            braces $ ppr lbl<>colon
+            <+> hsep (punctuate comma $ map pprUw $ Map.toList uws)
+          pprUw (g, expr) = ppr g <> char '=' <> ppr expr
 
 -- | Intermediate data structure holding debug-relevant context information
 -- about a block.
-type BlockContext = (CmmBlock, RawCmmDecl, UnwindTable)
+type BlockContext = (CmmBlock, RawCmmDecl, UnwindPoints)
 
 -- | Extract debug data from a group of procedures. We will prefer
 -- source notes that come from the given module (presumably the module
@@ -151,6 +157,8 @@ cmmDebugGen modLoc decls = map (blocksForScope Nothing) topScopes
               nested = fromMaybe [] $ Map.lookup scope scopeMap
               childs = map (mkBlock False) (tail bctxs) ++
                        map (blocksForScope stick) nested
+
+              mkBlock :: Bool -> BlockContext -> DebugBlock
               mkBlock top (block, prc, unwind)
                 = DebugBlock { dblProcedure    = g_entry graph
                              , dblLabel        = label
@@ -194,24 +202,35 @@ cmmDebugGen modLoc decls = map (blocksForScope Nothing) topScopes
 -- lacking.
 blockContexts :: RawCmmGroup -> Map.Map CmmTickScope [BlockContext]
 blockContexts decls = Map.map reverse $ foldr walkProc Map.empty decls
-  where walkProc CmmData{}                 m = m
+  where walkProc :: RawCmmDecl
+                 -> Map.Map CmmTickScope [BlockContext]
+                 -> Map.Map CmmTickScope [BlockContext]
+        walkProc CmmData{}                 m = m
         walkProc prc@(CmmProc _ _ _ graph) m
           | mapNull blocks = m
           | otherwise      = snd $ walkBlock prc entry Map.empty (emptyLbls, m)
           where blocks = toBlockMap graph
                 entry  = [mapFind (g_entry graph) blocks]
                 emptyLbls = setEmpty :: LabelSet
-        walkBlock _   []             _      c            = c
-        walkBlock prc (block:blocks) unwind (visited, m)
+
+        walkBlock :: RawCmmDecl -> [Block CmmNode C C]
+                  -> UnwindTable     -- ^ unwinding table of predecessor block
+                  -> (LabelSet, Map.Map CmmTickScope [BlockContext])
+                  -> (LabelSet, Map.Map CmmTickScope [BlockContext])
+        walkBlock _   []             _          c            = c
+        walkBlock prc (block:blocks) predUnwind (visited, m)
           | lbl `setMember` visited
-          = walkBlock prc blocks unwind (visited, m)
+          = walkBlock prc blocks predUnwind (visited, m)
           | otherwise
-          = walkBlock prc blocks unwind $
-            walkBlock prc succs unwind'
+          = walkBlock prc blocks predUnwind $
+            walkBlock prc succs succUnwind
               (lbl `setInsert` visited,
                insertMulti scope (block, prc, unwind') m)
           where CmmEntry lbl scope = firstNode block
-                unwind' = extractUnwind block `Map.union` unwind
+                -- fold in unwinding information from predecessor block
+                unwind' = addDefaultUnwindings predUnwind
+                        $ extractUnwindTables block
+                succUnwind = lastUnwindingPoint unwind'
                 (CmmProc _ _ _ graph) = prc
                 succs = map (flip mapFind (toBlockMap graph))
                             (successors (lastNode block))
@@ -251,8 +270,17 @@ debugToMap = mapUnions . map go
 
 -- | Maps registers to expressions that yield their "old" values
 -- further up the stack. Most interesting for the stack pointer Sp,
--- but might be useful to document saved registers, too.
+-- but might be useful to document saved registers, too. The 'Label'
+-- gives the label in the generated block that this table is associated
+-- with.
 type UnwindTable = Map.Map GlobalReg UnwindExpr
+
+-- | A sequence of locations within a block annotated with unwinding tables.
+-- This list is sorted in the order that the labels occur in the block.
+newtype UnwindPoints = UnwindPoints [(CLabel, UnwindTable)]
+
+instance Outputable UnwindPoints where
+  ppr (UnwindPoints pts) = ppr pts
 
 -- | Expressions, used for unwind information
 data UnwindExpr = UwConst Int                   -- ^ literal value
@@ -278,16 +306,29 @@ instance Outputable UnwindExpr where
                             = pprPrec 2 e0 <> char '*' <> pprPrec 2 e1
   pprPrec _ other           = parens (pprPrec 0 other)
 
-extractUnwind :: CmmBlock -> UnwindTable
-extractUnwind b = go $ blockToList mid
-  where (_, mid, _) = blockSplit b
-        go :: [CmmNode O O] -> UnwindTable
-        go []       = Map.empty
-        go (x : xs) = case x of
-          CmmUnwind g so -> Map.insert g (toUnwindExpr so) $! go xs
-          CmmTick {}     -> go xs
-          _other         -> Map.empty
-                            -- TODO: Unwind statements after actual instructions
+
+-- | @addDefaultUnwindings uws points@ adds default unwinding information
+-- from @uws@ to @points@.
+addDefaultUnwindings :: UnwindTable -> UnwindPoints -> UnwindPoints
+addDefaultUnwindings uws (UnwindPoints pts) =
+    UnwindPoints $ map (fmap (`Map.union` uws)) pts
+
+-- | The unwinding table from the last unwinding point in a block
+lastUnwindingPoint :: UnwindPoints -> UnwindTable
+lastUnwindingPoint (UnwindPoints [])  = Map.empty
+lastUnwindingPoint (UnwindPoints pts) = snd $ last pts
+
+extractUnwindTables :: CmmBlock -> UnwindPoints
+extractUnwindTables b =
+    UnwindPoints $ mapMaybe nodeToUnwind $ blockToList mid
+  where
+    (_, mid, _) = blockSplit b
+
+    nodeToUnwind :: CmmNode O O -> Maybe (CLabel, UnwindTable)
+    nodeToUnwind (CmmUnwind lbl g so) =
+        -- FIXME: why a block label if this isn't a block?
+        Just (mkAsmTempLabel (getUnique lbl), toUnwindExpr <$> Map.singleton g so)
+    nodeToUnwind _                    = Nothing
 
 -- | Conversion of Cmm expressions to unwind expressions. We check for
 -- unsupported operator usages and simplify the expression as far as
