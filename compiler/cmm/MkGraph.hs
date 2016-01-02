@@ -14,6 +14,7 @@ module MkGraph
   , mkRawJump
   , mkCbranch, mkSwitch
   , mkReturn, mkComment, mkCallEntry, mkBranch
+  , mkUnwind
   , copyInOflow, copyOutOflow
   , noExtraStack
   , toCall, Transfer(..)
@@ -293,6 +294,8 @@ mkJumpReturnsTo dflags f callConv actuals ret_lbl ret_off updfr_off  = do
 mkUnsafeCall  :: ForeignTarget -> [CmmFormal] -> [CmmActual] -> CmmAGraph
 mkUnsafeCall t fs as = mkMiddle $ CmmUnsafeForeignCall t fs as
 
+mkUnwind     :: Label -> GlobalReg -> CmmExpr -> CmmAGraph
+mkUnwind lbl r e = mkMiddle $ CmmUnwind lbl [(r, e)]
 
 --------------------------------------------------------------------------
 
