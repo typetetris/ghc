@@ -757,8 +757,7 @@ emitStore l r = emitCgStmt (CgStmt (CmmStore l r))
 
 
 newLabelC :: FCode BlockId
-newLabelC = do { u <- newUnique
-               ; return $ mkBlockId u }
+newLabelC = newBlockId
 
 emit :: CmmAGraph -> FCode ()
 emit ag
