@@ -797,7 +797,7 @@ manifestSp dflags stackmaps stack0 sp0 sp_high
     let add_unwind_info block
           | debugLevel dflags > 0 = do
               lbl <- mkBlockId <$> getUniqueM
-              pure $ CmmUnwind lbl Sp sp_unwind : block
+              pure $ CmmUnwind lbl [(Sp, sp_unwind)] : block
           | otherwise             = pure block
         sp_unwind = CmmRegOff (CmmGlobal Sp) (sp0 - wORD_SIZE dflags)
 

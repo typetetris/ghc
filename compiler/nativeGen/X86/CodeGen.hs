@@ -163,7 +163,7 @@ stmtToInstrs stmt = do
   case stmt of
     CmmComment s      -> return (unitOL (COMMENT s))
     CmmTick {}        -> return nilOL
-    CmmUnwind lbl _ _ -> return (unitOL (LABEL lbl))
+    CmmUnwind lbl _   -> return (unitOL (LABEL lbl))
 
     CmmAssign reg src
       | isFloatType ty         -> assignReg_FltCode format reg src

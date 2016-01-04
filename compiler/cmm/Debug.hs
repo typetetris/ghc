@@ -325,9 +325,9 @@ extractUnwindTables b =
     (_, mid, _) = blockSplit b
 
     nodeToUnwind :: CmmNode O O -> Maybe (CLabel, UnwindTable)
-    nodeToUnwind (CmmUnwind lbl g so) =
+    nodeToUnwind (CmmUnwind lbl regs) =
         -- FIXME: why a block label if this isn't a block?
-        Just (mkAsmTempLabel (getUnique lbl), toUnwindExpr <$> Map.singleton g so)
+        Just (mkAsmTempLabel lbl, toUnwindExpr <$> Map.fromList regs)
     nodeToUnwind _                    = Nothing
 
 -- | Conversion of Cmm expressions to unwind expressions. We check for
