@@ -283,8 +283,8 @@ instance Outputable UnwindPoints where
   ppr (UnwindPoints pts) = ppr pts
 
 -- | Expressions, used for unwind information
-data UnwindExpr = UwConst Int                   -- ^ literal value
-                | UwReg GlobalReg Int           -- ^ register plus offset
+data UnwindExpr = UwConst !Int                  -- ^ literal value
+                | UwReg !GlobalReg !Int         -- ^ register plus offset
                 | UwDeref UnwindExpr            -- ^ pointer dereferencing
                 | UwLabel CLabel
                 | UwPlus UnwindExpr UnwindExpr
