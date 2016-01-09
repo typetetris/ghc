@@ -223,7 +223,7 @@ emitForeignCall safety results target args
     updfr_off <- getUpdFrameOff
     target' <- load_target_into_temp target
     args' <- mapM maybe_assign_temp args
-    k <- newLabelC
+    k <- newBlockId
     let (off, _, copyout) = copyInOflow dflags NativeReturn (Young k) results []
        -- see Note [safe foreign call convention]
     tscope <- getTickScope
