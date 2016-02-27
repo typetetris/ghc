@@ -120,13 +120,33 @@ cmmDataLlvmGens statics
 
        renderLlvm $ pprLlvmData (concat gss', concat tss)
 
+-- | LLVM can't handle entry blocks which loop back to themselves.
+fixBottom :: RawCmmDecl -> LlvmM RawCmmDecl
+fixBottom (CmmProc hdr entry_lbl live g) = CmmProc hdr entry_lbl live g'
+  where
+    blk_map = toBlockMap g
+    entry_blk = mapLookup entry_lbl blk_map
+    g' = ofBlockMap entry_lbl
+         $ foldl' (flip insertBlock) (fix_block entry_blk)
+
+    fix_block :: CmmBlock -> LlvmM [CmmBlock]
+    fix_block blk
+      | [CmmEntry _ tickscope, CmmBranch lbl] <- blockToList blk
+      , lbl == entry_lbl  = do
+            new_lbl <- mkBlockId
+            pure [ blockOfList [CmmEntry entry_lbl tickscope, CmmBranch new_lbl]
+                 , blockOfList [CmmEntry new_lbl tickscope, CmmBranch new_lbl] ]
+    fix_block blk = pure [blk]
+fixBottom other = other
+
 -- | Complete LLVM code generation phase for a single top-level chunk of Cmm.
 cmmLlvmGen ::RawCmmDecl -> LlvmM ()
 cmmLlvmGen cmm@CmmProc{} = do
 
     -- rewrite assignments to global regs
     dflags <- getDynFlag id
-    let fixed_cmm = {-# SCC "llvm_fix_regs" #-}
+    let fixed_cmm = fixBottom
+                  $ {-# SCC "llvm_fix_regs" #-}
                     fixStgRegisters dflags cmm
 
     dumpIfSetLlvm Opt_D_dump_opt_cmm "Optimised Cmm" (pprCmmGroup [fixed_cmm])
