@@ -102,7 +102,7 @@ module TysWiredIn (
         -- * RuntimeRep and friends
         runtimeRepTyCon, vecCountTyCon, vecElemTyCon,
 
-        runtimeRepTy, ptrRepLiftedTy,
+        runtimeRepTy, ptrRepLiftedTy, ptrRepLiftedDataCon,
 
         vecRepDataConTyCon, ptrRepUnliftedDataConTyCon,
 

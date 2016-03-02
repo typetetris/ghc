@@ -9,6 +9,9 @@ data Coercion
 data LeftOrRight
 data UnivCoProvenance
 data TCvSubst
+data TyLit
+data TyBinder
+data TyPrec
 
 type PredType = Type
 type Kind = Type
