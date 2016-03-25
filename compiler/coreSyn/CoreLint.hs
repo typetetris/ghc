@@ -130,6 +130,12 @@ Outstanding issues:
     --   may well be happening...);
 
 
+Note [Linting function types]
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+As described in Note [Representation of function types], all saturated
+applications of funTyCon are represented with the FunTy constructor. We check
+this invariant in lintType.
+
 Note [Linting type lets]
 ~~~~~~~~~~~~~~~~~~~~~~~~
 In the desugarer, it's very very convenient to be able to say (in effect)
@@ -1083,6 +1089,13 @@ lintType ty@(TyConApp tc tys)
   | Just ty' <- coreView ty
   = lintType ty'   -- Expand type synonyms, so that we do not bogusly complain
                    --  about un-saturated type synonyms
+
+  -- We should never see a saturated application of funTyCon; such applications
+  -- should be represented with the FunTy constructor. See Note [Linting
+  -- function types] and Note [Representation of function types].
+  | isFunTyCon tc
+  , length tys == 4
+  = failWithL (hang (text "Saturated application of (->)") 2 (ppr ty))
 
   | isUnliftedTyCon tc || isTypeSynonymTyCon tc || isTypeFamilyTyCon tc
        -- Also type synonyms and type families
