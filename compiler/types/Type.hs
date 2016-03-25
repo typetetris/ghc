@@ -214,7 +214,8 @@ import Class
 import TyCon
 import TysPrim
 import {-# SOURCE #-} TysWiredIn ( listTyCon, typeNatKind
-                                 , typeSymbolKind, runtimeRepTy, liftedTypeKind )
+                                 , typeSymbolKind, runtimeRepTy, ptrRepLiftedTy
+                                 , liftedTypeKind )
 import PrelNames
 import CoAxiom
 import {-# SOURCE #-} Coercion
@@ -1019,6 +1020,8 @@ tyConAppArgN n ty
 -- | If given a type @TYPE (rr :: RuntimeRep)@ then returns @Just rr@
 -- otherwise @Nothing@.
 tyRuntimeRep_maybe :: Type -> Maybe Type
+tyRuntimeRep_maybe ty
+  | isConstraintKind ty   = Just ptrRepLiftedTy -- FIXME This is a hack
 tyRuntimeRep_maybe (TyConApp tc [rr])
   | tc == tYPETyCon       = ASSERT(typeKind rr `eqType` runtimeRepTy)
                             Just rr
