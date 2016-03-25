@@ -870,7 +870,7 @@ mkNthCo 0 (Refl _ ty)
   | Just (tv, _) <- splitForAllTy_maybe ty
   = Refl Nominal (tyVarKind tv)
 mkNthCo n (Refl r ty)
-  = ASSERT( ok_tc_app ty n )
+  = ASSERT2( ok_tc_app ty n, ppr n $$ ppr ty )
     mkReflCo r' (tyConAppArgN n ty)
   where tc = tyConAppTyCon ty
         r' = nthRole r tc n
