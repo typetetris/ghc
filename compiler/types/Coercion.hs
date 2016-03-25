@@ -581,13 +581,7 @@ mkFunCo r co1 co2 =
     -- for each co :: (t1 :: TYPE r1) ~ (t2 :: TYPE r2)
     -- we need rep_co :: r1 ~ r2
     mkRuntimeRepCo :: Coercion -> Coercion
-    mkRuntimeRepCo co
-      | Just (tc, [rep]) <- splitTyConAppCo_maybe $ mkKindCo co
-      , tc == tYPETyCon
-      = rep
-      | otherwise
-      = pprPanic "mkFunCo.mkRuntimeRepCo"
-                 (ppr co $$ ppr co1 <+> arrow <+> ppr co2)
+    mkRuntimeRepCo = mkNthCo 0 . mkKindCo
 
 
 -- | Make nested function 'Coercion's
