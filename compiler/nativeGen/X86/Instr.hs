@@ -38,6 +38,7 @@ import DynFlags
 import UniqSet
 import Unique
 import UniqSupply
+import Debug (UnwindTable)
 
 import Control.Monad
 import Data.Maybe       (fromMaybe)
@@ -178,13 +179,12 @@ data Instr
         -- invariants for a BasicBlock (see Cmm).
         | NEWBLOCK BlockId
 
-        -- define a new label within a block. Used to refer to points within a
-        -- block during generation of debugging information.
-        | LABEL BlockId
+        -- unwinding information
+        | UNWIND BlockId UnwindTable
 
-        -- specify current stack offset for
-        -- benefit of subsequent passes
-        | DELTA   Int
+        -- specify current stack offset for benefit of subsequent passes.
+        -- This carries a BlockId so it can be used in unwinding information.
+        | DELTA  Int
 
         -- Moves.
         | MOV         Format Operand Operand
@@ -787,7 +787,7 @@ x86_isMetaInstr instr
         LOCATION{}      -> True
         LDATA{}         -> True
         NEWBLOCK{}      -> True
-        LABEL{}         -> True
+        UNWIND{}        -> True
         DELTA{}         -> True
         _               -> False
 

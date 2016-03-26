@@ -290,7 +290,6 @@ saveThreadState :: MonadUnique m => DynFlags -> Maybe InitialSp -> m CmmAGraph
 saveThreadState dflags initialSp = do
   tso <- newTemp (gcWord dflags)
   close_nursery <- closeNursery dflags tso
-  lbl <- newBlockId
   pure $ catAGraphs [
     -- tso = CurrentTSO;
     mkAssign (CmmLocal tso) stgCurrentTSO,
@@ -309,7 +308,7 @@ saveThreadState dflags initialSp = do
               CmmLoad (cmmOffset dflags stgCurrentTSO (tso_stackobj dflags))
                       (bWord dflags)
             spValue = cmmOffset dflags tsoValue (stack_SP dflags)
-        in mkUnwind lbl Sp (initial spValue)
+        in mkUnwind Sp (initial spValue)
       _ -> mkNop,
     close_nursery,
     -- and save the current cost centre stack in the TSO when profiling:
@@ -383,7 +382,6 @@ loadThreadState dflags initialSp = do
   tso <- newTemp (gcWord dflags)
   stack <- newTemp (gcWord dflags)
   open_nursery <- openNursery dflags tso
-  lbl <- newBlockId
   pure $ catAGraphs [
     -- tso = CurrentTSO;
     mkAssign (CmmLocal tso) stgCurrentTSO,
@@ -394,7 +392,7 @@ loadThreadState dflags initialSp = do
     -- unwind Sp = initialSp(Sp);
     case initialSp of
       Just initial | debugLevel dflags > 0 ->
-        mkUnwind lbl Sp (initial (CmmReg sp))
+        mkUnwind Sp (initial (CmmReg sp))
       _ -> mkNop,
     -- SpLim = stack->stack + RESERVED_STACK_WORDS;
     mkAssign spLim (cmmOffsetW dflags (cmmOffset dflags (CmmReg (CmmLocal stack)) (stack_STACK dflags))

@@ -739,8 +739,7 @@ emitUnwind :: [(GlobalReg, CmmExpr)] -> FCode ()
 emitUnwind regs = do
   dflags <- getDynFlags
   when (debugLevel dflags > 0) $ do
-     lbl <- newLabelC
-     emitCgStmt $ CgStmt $ CmmUnwind lbl regs
+     emitCgStmt $ CgStmt $ CmmUnwind regs
 
 emitAssign :: CmmReg  -> CmmExpr -> FCode ()
 emitAssign l r = emitCgStmt (CgStmt (CmmAssign l r))

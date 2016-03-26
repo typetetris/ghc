@@ -18,9 +18,8 @@ module Debug (
   debugToMap,
 
   -- * Unwinding information
-  UnwindTable, UnwindPoints(..), UnwindExpr(..),
-  addDefaultUnwindings
-
+  UnwindTable, UnwindPoint(..),
+  UnwindExpr(..), toUnwindExpr
   ) where
 
 import BlockId
@@ -59,7 +58,7 @@ data DebugBlock =
   , dblPosition   :: !(Maybe Int)  -- ^ Output position relative to
                                    -- other blocks. @Nothing@ means
                                    -- the block was optimized out
-  , dblUnwind     :: UnwindPoints  -- ^ Unwind information
+  , dblUnwind     :: [UnwindPoint]
   , dblBlocks     :: ![DebugBlock] -- ^ Nested blocks
   }
 
@@ -77,17 +76,11 @@ instance Outputable DebugBlock where
             (maybe empty ppr (dblSourceTick blk)) <+>
             (maybe (text "removed") ((text "pos " <>) . ppr)
                    (dblPosition blk)) <+>
-            pprUwPts (dblUnwind blk) $$
             (if null (dblBlocks blk) then empty else ppr (dblBlocks blk))
-    where pprUwPts (UnwindPoints pts) = hsep $ punctuate comma $ map pprUwPt pts
-          pprUwPt (lbl, uws) =
-            braces $ ppr lbl<>colon
-            <+> hsep (punctuate comma $ map pprUw $ Map.toList uws)
-          pprUw (g, expr) = ppr g <> char '=' <> ppr expr
 
 -- | Intermediate data structure holding debug-relevant context information
 -- about a block.
-type BlockContext = (CmmBlock, RawCmmDecl, UnwindPoints)
+type BlockContext = (CmmBlock, RawCmmDecl)
 
 -- | Extract debug data from a group of procedures. We will prefer
 -- source notes that come from the given module (presumably the module
@@ -133,7 +126,7 @@ cmmDebugGen modLoc decls = map (blocksForScope Nothing) topScopes
                    | otherwise                = panic "ticksToCopy impossible"
                 where ticks = bCtxsTicks $ fromMaybe [] $ Map.lookup s blockCtxs
       ticksToCopy _ = []
-      bCtxsTicks = concatMap (blockTicks . fstOf3)
+      bCtxsTicks = concatMap (blockTicks . fst)
 
       -- Finding the "best" source tick is somewhat arbitrary -- we
       -- select the first source span, while preferring source ticks
@@ -159,7 +152,7 @@ cmmDebugGen modLoc decls = map (blocksForScope Nothing) topScopes
                        map (blocksForScope stick) nested
 
               mkBlock :: Bool -> BlockContext -> DebugBlock
-              mkBlock top (block, prc, unwind)
+              mkBlock top (block, prc)
                 = DebugBlock { dblProcedure    = g_entry graph
                              , dblLabel        = label
                              , dblCLabel       = case info of
@@ -171,9 +164,9 @@ cmmDebugGen modLoc decls = map (blocksForScope Nothing) topScopes
                              , dblParent       = Nothing
                              , dblTicks        = ticks
                              , dblPosition     = Nothing -- see cmmDebugLink
-                             , dblUnwind       = unwind
                              , dblSourceTick   = stick
                              , dblBlocks       = blocks
+                             , dblUnwind       = []
                              }
                 where (CmmProc infos entryLbl _ graph) = prc
                       label = entryLabel block
@@ -197,9 +190,7 @@ cmmDebugGen modLoc decls = map (blocksForScope Nothing) topScopes
 --
 -- This involves a pre-order traversal, as we want blocks in rough
 -- control flow order (so ticks have a chance to be sorted in the
--- right order). We also use this opportunity to have blocks inherit
--- unwind information from their predecessor blocks where it is
--- lacking.
+-- right order).
 blockContexts :: RawCmmGroup -> Map.Map CmmTickScope [BlockContext]
 blockContexts decls = Map.map reverse $ foldr walkProc Map.empty decls
   where walkProc :: RawCmmDecl
@@ -208,29 +199,24 @@ blockContexts decls = Map.map reverse $ foldr walkProc Map.empty decls
         walkProc CmmData{}                 m = m
         walkProc prc@(CmmProc _ _ _ graph) m
           | mapNull blocks = m
-          | otherwise      = snd $ walkBlock prc entry Map.empty (emptyLbls, m)
+          | otherwise      = snd $ walkBlock prc entry (emptyLbls, m)
           where blocks = toBlockMap graph
                 entry  = [mapFind (g_entry graph) blocks]
                 emptyLbls = setEmpty :: LabelSet
 
         walkBlock :: RawCmmDecl -> [Block CmmNode C C]
-                  -> UnwindTable     -- ^ unwinding table of predecessor block
                   -> (LabelSet, Map.Map CmmTickScope [BlockContext])
                   -> (LabelSet, Map.Map CmmTickScope [BlockContext])
-        walkBlock _   []             _          c            = c
-        walkBlock prc (block:blocks) predUnwind (visited, m)
+        walkBlock _   []             c            = c
+        walkBlock prc (block:blocks) (visited, m)
           | lbl `setMember` visited
-          = walkBlock prc blocks predUnwind (visited, m)
+          = walkBlock prc blocks (visited, m)
           | otherwise
-          = walkBlock prc blocks predUnwind $
-            walkBlock prc succs succUnwind
+          = walkBlock prc blocks $
+            walkBlock prc succs
               (lbl `setInsert` visited,
-               insertMulti scope (block, prc, unwind') m)
+               insertMulti scope (block, prc) m)
           where CmmEntry lbl scope = firstNode block
-                -- fold in unwinding information from predecessor block
-                unwind' = addDefaultUnwindings predUnwind
-                        $ extractUnwindTables block
-                succUnwind = lastUnwindingPoint unwind'
                 (CmmProc _ _ _ graph) = prc
                 succs = map (flip mapFind (toBlockMap graph))
                             (successors (lastNode block))
@@ -253,14 +239,16 @@ cmmDebugLabels isMeta nats = seqList lbls lbls
         getBlocks _other                         = []
         allMeta (BasicBlock _ instrs) = all isMeta instrs
 
--- | Sets position fields in the debug block tree according to native
--- generated code.
-cmmDebugLink :: [Label] -> [DebugBlock] -> [DebugBlock]
-cmmDebugLink labels blocks = map link blocks
+-- | Sets position and unwind table fields in the debug block tree according to
+-- native generated code.
+cmmDebugLink :: [Label] -> BlockEnv [UnwindPoint] -> [DebugBlock] -> [DebugBlock]
+cmmDebugLink labels unwindPts blocks = map link blocks
   where blockPos :: LabelMap Int
         blockPos = mapFromList $ flip zip [0..] labels
         link block = block { dblPosition = mapLookup (dblLabel block) blockPos
                            , dblBlocks   = map link (dblBlocks block)
+                           , dblUnwind   = fromMaybe mempty
+                                         $ mapLookup (dblLabel block) unwindPts
                            }
 
 -- | Converts debug blocks into a label map for easier lookups
@@ -268,19 +256,22 @@ debugToMap :: [DebugBlock] -> LabelMap DebugBlock
 debugToMap = mapUnions . map go
    where go b = mapInsert (dblLabel b) b $ mapUnions $ map go (dblBlocks b)
 
+-- | A label associated with an 'UnwindTable'
+data UnwindPoint = UnwindPoint !Label !UnwindTable
+
+instance Outputable UnwindPoint where
+  ppr (UnwindPoint lbl uws) =
+      braces $ ppr lbl<>colon
+      <+> hsep (punctuate comma $ map pprUw $ Map.toList uws)
+    where
+      pprUw (g, expr) = ppr g <> char '=' <> ppr expr
+
 -- | Maps registers to expressions that yield their "old" values
 -- further up the stack. Most interesting for the stack pointer Sp,
 -- but might be useful to document saved registers, too. The 'Label'
 -- gives the label in the generated block that this table is associated
 -- with.
 type UnwindTable = Map.Map GlobalReg UnwindExpr
-
--- | A sequence of locations within a block annotated with unwinding tables.
--- This list is sorted in the order that the labels occur in the block.
-newtype UnwindPoints = UnwindPoints [(CLabel, UnwindTable)]
-
-instance Outputable UnwindPoints where
-  ppr (UnwindPoints pts) = ppr pts
 
 -- | Expressions, used for unwind information
 data UnwindExpr = UwConst !Int                  -- ^ literal value
@@ -305,30 +296,6 @@ instance Outputable UnwindExpr where
   pprPrec p (UwTimes e0 e1) | p <= 1
                             = pprPrec 2 e0 <> char '*' <> pprPrec 2 e1
   pprPrec _ other           = parens (pprPrec 0 other)
-
-
--- | @addDefaultUnwindings uws points@ adds default unwinding information
--- from @uws@ to @points@.
-addDefaultUnwindings :: UnwindTable -> UnwindPoints -> UnwindPoints
-addDefaultUnwindings uws (UnwindPoints pts) =
-    UnwindPoints $ map (fmap (`Map.union` uws)) pts
-
--- | The unwinding table from the last unwinding point in a block
-lastUnwindingPoint :: UnwindPoints -> UnwindTable
-lastUnwindingPoint (UnwindPoints [])  = Map.empty
-lastUnwindingPoint (UnwindPoints pts) = snd $ last pts
-
-extractUnwindTables :: CmmBlock -> UnwindPoints
-extractUnwindTables b =
-    UnwindPoints $ mapMaybe nodeToUnwind $ blockToList mid
-  where
-    (_, mid, _) = blockSplit b
-
-    nodeToUnwind :: CmmNode O O -> Maybe (CLabel, UnwindTable)
-    nodeToUnwind (CmmUnwind lbl regs) =
-        -- FIXME: why a block label if this isn't a block?
-        Just (mkAsmTempLabel lbl, toUnwindExpr <$> Map.fromList regs)
-    nodeToUnwind _                    = Nothing
 
 -- | Conversion of Cmm expressions to unwind expressions. We check for
 -- unsupported operator usages and simplify the expression as far as

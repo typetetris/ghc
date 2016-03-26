@@ -294,8 +294,8 @@ mkJumpReturnsTo dflags f callConv actuals ret_lbl ret_off updfr_off  = do
 mkUnsafeCall  :: ForeignTarget -> [CmmFormal] -> [CmmActual] -> CmmAGraph
 mkUnsafeCall t fs as = mkMiddle $ CmmUnsafeForeignCall t fs as
 
-mkUnwind     :: Label -> GlobalReg -> CmmExpr -> CmmAGraph
-mkUnwind lbl r e = mkMiddle $ CmmUnwind lbl [(r, e)]
+mkUnwind     :: GlobalReg -> CmmExpr -> CmmAGraph
+mkUnwind r e  = mkMiddle $ CmmUnwind [(r, e)]
 
 --------------------------------------------------------------------------
 

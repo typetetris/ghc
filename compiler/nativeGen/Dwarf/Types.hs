@@ -270,7 +270,9 @@ data DwarfFrameProc
 data DwarfFrameBlock
   = DwarfFrameBlock
     { dwFdeBlkHasInfo :: Bool
-    , dwFdeUnwind     :: UnwindPoints
+    , dwFdeUnwind     :: [UnwindPoint]
+      -- ^ these unwind points must occur in the same order as they occur
+      -- in the block
     }
 
 instance Outputable DwarfFrameBlock where
@@ -359,11 +361,11 @@ pprFrameProc frameLbl initUw (DwarfFrameProc procLbl hasInfo blocks)
 -- optimisations saves a lot of space, as subsequent blocks often have
 -- the same unwind information.
 pprFrameBlock :: DwarfFrameBlock -> S.State UnwindTable SDoc
-pprFrameBlock (DwarfFrameBlock hasInfo (UnwindPoints uws0)) =
+pprFrameBlock (DwarfFrameBlock hasInfo uws0) =
     vcat <$> zipWithM pprFrameDecl (True : repeat False) uws0
   where
-    pprFrameDecl :: Bool -> (CLabel, UnwindTable) -> S.State UnwindTable SDoc
-    pprFrameDecl firstDecl (lbl, uws) = S.state $ \oldUws ->
+    pprFrameDecl :: Bool -> UnwindPoint -> S.State UnwindTable SDoc
+    pprFrameDecl firstDecl (UnwindPoint lbl uws) = S.state $ \oldUws ->
         let isChanged g v | old == Just v  = Nothing
                           | otherwise      = Just (old, v)
                           where old = Map.lookup g oldUws

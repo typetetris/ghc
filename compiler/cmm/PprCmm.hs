@@ -197,7 +197,7 @@ pprNode node = pp_node <+> pp_debug
                    else empty
 
       -- unwind reg = expr;
-      CmmUnwind _ regs -> text "unwind " <> commafy (map (\(r,e) -> ppr r <+> char '=' <+> ppr e) regs) <> semi
+      CmmUnwind regs -> text "unwind " <> commafy (map (\(r,e) -> ppr r <+> char '=' <+> ppr e) regs) <> semi
 
       -- reg = expr;
       CmmAssign reg expr -> ppr reg <+> equals <+> ppr expr <> semi

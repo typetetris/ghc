@@ -32,7 +32,6 @@ import Control.Monad.Fix
 import Data.Array as Array
 import Data.Bits
 import Data.List (nub)
-import Control.Monad ((<=<))
 
 import Prelude hiding ((<*>))
 
@@ -276,8 +275,8 @@ layout dflags procpoints liveness entry entry_args final_stackmaps final_sp_high
        --
        let middle_pre = blockToList $ foldl blockSnoc middle1 middle2
 
-       final_blocks <- manifestSp dflags final_stackmaps stack0 sp0 final_sp_high entry0
-                                  middle_pre sp_off last1 fixup_blocks
+       let final_blocks = manifestSp dflags final_stackmaps stack0 sp0 final_sp_high entry0
+                                     middle_pre sp_off last1 fixup_blocks
 
        let acc_stackmaps' = mapUnion acc_stackmaps out
 
@@ -782,38 +781,36 @@ manifestSp
    -> ByteOff            -- sp_off
    -> CmmNode O C        -- last node
    -> [CmmBlock]         -- new blocks
-   -> UniqSM [CmmBlock]  -- final blocks with Sp manifest
+   -> [CmmBlock]         -- final blocks with Sp manifest
 
 manifestSp dflags stackmaps stack0 sp0 sp_high
            first middle_pre sp_off last fixup_blocks
-  = do
-    let area_off = getAreaOff stackmaps
+  = let area_off = getAreaOff stackmaps
 
-    let adj_pre_sp, adj_post_sp :: CmmNode e x -> CmmNode e x
+        adj_pre_sp, adj_post_sp :: CmmNode e x -> CmmNode e x
         adj_pre_sp  = mapExpDeep (areaToSp dflags sp0            sp_high area_off)
         adj_post_sp = mapExpDeep (areaToSp dflags (sp0 - sp_off) sp_high area_off)
 
-    -- Add unwind pseudo-instructions to document Sp level for debugging
-    let add_unwind_info block
-          | debugLevel dflags > 0 = do
-              lbl <- mkBlockId <$> getUniqueM
-              pure $ CmmUnwind lbl [(Sp, sp_unwind)] : block
-          | otherwise             = pure block
+        -- Add unwind pseudo-instructions to document Sp level for debugging
+        add_unwind_info block
+          | debugLevel dflags > 0 =
+              CmmUnwind [(Sp, sp_unwind)] : block
+          | otherwise             = block
         sp_unwind = CmmRegOff (CmmGlobal Sp) (sp0 - wORD_SIZE dflags)
 
-    final_middle <- pure . maybeAddSpAdj dflags sp_off
-                <=< pure . blockFromList
-                <=<        add_unwind_info
-                <=< pure . map adj_pre_sp
-                <=< pure . elimStackStores stack0 stackmaps area_off
-                 $  middle_pre
-    let final_last    = optStackCheck (adj_post_sp last)
+        final_middle = maybeAddSpAdj dflags sp_off
+                     . blockFromList
+                     . add_unwind_info
+                     . map adj_pre_sp
+                     . elimStackStores stack0 stackmaps area_off
+                     $ middle_pre
+        final_last    = optStackCheck (adj_post_sp last)
 
         final_block   = blockJoin first final_middle final_last
 
         fixup_blocks' = map (mapBlock3' (id, adj_post_sp, id)) fixup_blocks
 
-    pure $ final_block : fixup_blocks'
+     in final_block : fixup_blocks'
 
 
 getAreaOff :: BlockEnv StackMap -> (Area -> StackLoc)
@@ -1017,8 +1014,8 @@ findLastUnwinding reg block =
       xs -> Just $ last xs
   where
     (_,mid,_) = blockSplit block
-    isUnwind (CmmUnwind _ regs) = lookup reg regs
-    isUnwind _                  = Nothing
+    isUnwind (CmmUnwind regs) = lookup reg regs
+    isUnwind _                = Nothing
 
 -- | @substReg reg expr subst@ replaces all occurrences of @CmmReg reg@ in
 -- @expr@ with @subst@.
