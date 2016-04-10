@@ -162,7 +162,7 @@ addSpUnwindings instr@(DELTA d) = do
     dflags <- getDynFlags
     if debugLevel dflags >= 1
         then do lbl <- newBlockId
-                let unwind = M.singleton MachSp (UwReg MachSp d)
+                let unwind = M.singleton MachSp (UwReg MachSp $ negate d)
                 return $ toOL [ instr, UNWIND lbl unwind ]
         else return (unitOL instr)
 addSpUnwindings instr = return $ unitOL instr
