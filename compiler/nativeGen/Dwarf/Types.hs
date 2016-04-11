@@ -343,7 +343,7 @@ pprFrameProc frameLbl initUw (DwarfFrameProc procLbl hasInfo blocks)
         procEnd     = mkAsmTempEndLabel procLbl
         ifInfo str  = if hasInfo then text str else empty
                       -- see [Note: Info Offset]
-    in pprTrace "FrameProc" (ppr procLbl <+> ppr hasInfo <+> ppr blocks) $
+    in --pprTrace "FrameProc" (ppr procLbl <+> ppr hasInfo <+> ppr blocks) $
        vcat [ pprData4' (ppr fdeEndLabel <> char '-' <> ppr fdeLabel)
             , ppr fdeLabel <> colon
             , pprData4' (ppr frameLbl <> char '-' <>
