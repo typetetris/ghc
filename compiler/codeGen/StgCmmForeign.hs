@@ -46,6 +46,7 @@ import Maybes
 import Outputable
 import UniqSupply
 import BasicTypes
+import FastString
 
 import Control.Monad
 
@@ -309,7 +310,7 @@ saveThreadState dflags initialSp = do
                       (bWord dflags)
             spValue = cmmOffset dflags tsoValue (stack_SP dflags)
         in mkUnwind Sp (initial spValue)
-      _ -> mkNop,
+      _ -> mkComment $ mkFastString "Couldn't find unwinding",
     close_nursery,
     -- and save the current cost centre stack in the TSO when profiling:
     if gopt Opt_SccProfilingOn dflags then
@@ -393,7 +394,7 @@ loadThreadState dflags initialSp = do
     case initialSp of
       Just initial | debugLevel dflags > 0 ->
         mkUnwind Sp (initial (CmmReg sp))
-      _ -> mkNop,
+      _ -> mkComment $ mkFastString "Couldn't find unwinding",
     -- SpLim = stack->stack + RESERVED_STACK_WORDS;
     mkAssign spLim (cmmOffsetW dflags (cmmOffset dflags (CmmReg (CmmLocal stack)) (stack_STACK dflags))
                                 (rESERVED_STACK_WORDS dflags)),
