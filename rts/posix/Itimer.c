@@ -177,6 +177,7 @@ static void install_vtalrm_handler(TickProc handle_tick)
 #if defined(USE_PTHREAD_FOR_ITIMER)
 enum ItimerState {STOPPED, RUNNING, STOPPING, EXITED};
 static volatile enum ItimerState itimer_state = STOPPED;
+
 static void *itimer_thread_func(void *_handle_tick)
 {
     TickProc handle_tick = _handle_tick;
@@ -189,7 +190,7 @@ static void *itimer_thread_func(void *_handle_tick)
     it.it_value.tv_nsec = TimeToNS(itimer_interval) % 1000000000;
     it.it_interval = it.it_value;
 
-    timerfd = timerfd_create(CLOCK_MONOTONIC,TFD_CLOEXEC);
+    timerfd = timerfd_create(CLOCK_MONOTONIC, TFD_CLOEXEC);
     if (timerfd == -1) {
         sysErrorBelch("timerfd_create");
         stg_exit(EXIT_FAILURE);
@@ -197,12 +198,15 @@ static void *itimer_thread_func(void *_handle_tick)
     if (!TFD_CLOEXEC) {
       fcntl(timerfd, F_SETFD, FD_CLOEXEC);
     }
-    timerfd_settime(timerfd,0,&it,NULL);
+    timerfd_settime(timerfd, 0, &it, NULL);
 #endif
 
     while (1) {
         if (USE_TIMERFD_FOR_ITIMER) {
-            if (read(timerfd, &nticks, sizeof(nticks)) != sizeof(nticks)) {
+            // If the timer is disabled with -I0 don't pause lest we livelock
+            // (see #11830)
+            if (itimer_interval > 0
+                && (read(timerfd, &nticks, sizeof(nticks)) != sizeof(nticks))) {
                 if (errno != EINTR) {
                     sysErrorBelch("Itimer: read(timerfd) failed");
                 }
