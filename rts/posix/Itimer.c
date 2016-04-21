@@ -191,7 +191,6 @@ static void *itimer_thread_func(void *_handle_tick)
     it.it_interval = it.it_value;
 
     timerfd = timerfd_create(CLOCK_MONOTONIC, TFD_CLOEXEC);
-    sysErrorBelch("timerfd_create returns %d\n", timerfd);
     if (timerfd == -1) {
         sysErrorBelch("timerfd_create");
         stg_exit(EXIT_FAILURE);
@@ -200,14 +199,11 @@ static void *itimer_thread_func(void *_handle_tick)
       fcntl(timerfd, F_SETFD, FD_CLOEXEC);
     }
     int ret = timerfd_settime(timerfd, 0, &it, NULL);
-    sysErrorBelch("timerfd_settime(%ld) == %d\n", TimeToNS(itimer_interval), ret);
 #endif
 
     while (1) {
         if (USE_TIMERFD_FOR_ITIMER) {
-            sysErrorBelch("waiting for itimer... ");
             if (read(timerfd, &nticks, sizeof(nticks)) != sizeof(nticks)) {
-                sysErrorBelch("here we go");
                 if (errno != EINTR) {
                     sysErrorBelch("Itimer: read(timerfd) failed");
                 }
@@ -219,18 +215,14 @@ static void *itimer_thread_func(void *_handle_tick)
         }
         switch (itimer_state) {
             case RUNNING:
-                sysErrorBelch("itimer=running\n");
                 handle_tick(0);
                 break;
             case STOPPED:
-                sysErrorBelch("itimer=stopped\n");
                 break;
             case STOPPING:
-                sysErrorBelch("itimer=stopping\n");
                 itimer_state = STOPPED;
                 break;
             case EXITED:
-                sysErrorBelch("itimer=exited\n");
                 if (USE_TIMERFD_FOR_ITIMER)
                     close(timerfd);
                 return NULL;
@@ -245,7 +237,6 @@ initTicker (Time interval, TickProc handle_tick)
 {
     itimer_interval = interval;
 
-    sysErrorBelch("initTicker\n");
 #if defined(USE_PTHREAD_FOR_ITIMER)
     pthread_t tid;
     int r = pthread_create(&tid, NULL, itimer_thread_func, (void*)handle_tick);
@@ -318,20 +309,19 @@ startTicker(void)
 void
 stopTicker(void)
 {
-    sysErrorBelch("stopTicker\n");
 #if defined(USE_PTHREAD_FOR_ITIMER)
     if (itimer_state == RUNNING) {
         itimer_state = STOPPING;
         /* Wait for the thread to confirm it won't generate another tick. */
         write_barrier();
-        sysErrorBelch("stopTicker: waiting for stopped\n");
-        // There is a tricky race condition here when the ticker is stopped then
-        // immediately started again by another thread. To ensure the
-        // STOPPING-requestor doesn't livelock we need to wait until we transition
-        // to STOPPED. This was the cause of #11830.
+        // There is a tricky race condition here when the ticker is stopped
+        // (itimer_state set to STOPPING) then immediately started again
+        // (itimer_state set to RUNNING) by another thread. STOPPING-requestor
+        // if we wait until itimer_state == STOPPED we may livelock here, since
+        // the ticker thread may never transition into STOPPED in this case.
+        // This was the cause of #11830.
         while (itimer_state == STOPPING)
             sched_yield();
-        sysErrorBelch("stopTicker: stopped\n");
     }
 #elif defined(USE_TIMER_CREATE)
     struct itimerspec it;
@@ -361,7 +351,6 @@ stopTicker(void)
 void
 exitTicker (rtsBool wait STG_UNUSED)
 {
-    sysErrorBelch("exitTicker\n");
 #if defined(USE_PTHREAD_FOR_ITIMER)
     itimer_state = EXITED;
 #elif defined(USE_TIMER_CREATE)
