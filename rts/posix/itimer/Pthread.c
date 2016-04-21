@@ -203,6 +203,7 @@ stopTicker(void)
 void
 exitTicker (rtsBool wait)
 {
+    ASSERT(!exited);
     exited = 1;
     // ensure that ticker wakes up if stopped
     startTicker();
