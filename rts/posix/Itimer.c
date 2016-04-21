@@ -280,29 +280,11 @@ void
 startTicker(void)
 {
 #if defined(USE_PTHREAD_FOR_ITIMER)
-    // There is a tricky race condition here when the ticker is stopped then
-    // immediately started again by another thread. To ensure the
-    // STOPPING-requestor doesn't livelock we need to wait until we transition
-    // to STOPPED. This was the cause of #11830.
-    switch (itimer_state) {
-    case RUNNING:
-        // already running, nothing to be done.
-        sysErrorBelch("startTicker: already running\n");
-        break;
-    case STOPPING:
-        sysErrorBelch("startTicker: waiting for stop\n");
-        while (itimer_state != STOPPED)
-            sched_yield();
-        // fall through
-    case STOPPED:
-        sysErrorBelch("startTicker: starting\n");
-        itimer_state = RUNNING;
-        break;
-    case EXITED:
+    // sanity check
+    if (itimer_state == EXITED) {
         sysErrorBelch("ITimer: Tried to start a dead timer!\n");
         stg_exit(EXIT_FAILURE);
     }
-
     itimer_state = RUNNING;
 #elif defined(USE_TIMER_CREATE)
     {
@@ -343,7 +325,11 @@ stopTicker(void)
         /* Wait for the thread to confirm it won't generate another tick. */
         write_barrier();
         sysErrorBelch("stopTicker: waiting for stopped\n");
-        while (itimer_state != STOPPED)
+        // There is a tricky race condition here when the ticker is stopped then
+        // immediately started again by another thread. To ensure the
+        // STOPPING-requestor doesn't livelock we need to wait until we transition
+        // to STOPPED. This was the cause of #11830.
+        while (itimer_state == STOPPING)
             sched_yield();
         sysErrorBelch("stopTicker: stopped\n");
     }
