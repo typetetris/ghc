@@ -312,16 +312,8 @@ stopTicker(void)
 #if defined(USE_PTHREAD_FOR_ITIMER)
     if (itimer_state == RUNNING) {
         itimer_state = STOPPING;
-        /* Wait for the thread to confirm it won't generate another tick. */
-        write_barrier();
-        // There is a tricky race condition here when the ticker is stopped
-        // (itimer_state set to STOPPING) then immediately started again
-        // (itimer_state set to RUNNING) by another thread. STOPPING-requestor
-        // if we wait until itimer_state == STOPPED we may livelock here, since
-        // the ticker thread may never transition into STOPPED in this case.
-        // This was the cause of #11830.
-        while (itimer_state == STOPPING)
-            sched_yield();
+        // Note that the timer may fire once more, but that's okay;
+        // handle_tick is only called when itimer_state == RUNNING
     }
 #elif defined(USE_TIMER_CREATE)
     struct itimerspec it;
