@@ -93,6 +93,7 @@ static volatile HsBool exited = 1;
 // Signaled when we want to (re)start the timer
 static pthread_cond_t start_cond;
 static pthread_mutex_t mutex;
+static pthread_t thread;
 
 static void *itimer_thread_func(void *_handle_tick)
 {
@@ -170,13 +171,13 @@ initTicker (Time interval, TickProc handle_tick)
         stg_exit(EXIT_FAILURE);
     }
 
-    pthread_t tid;
-    int r = pthread_create(&tid, NULL, itimer_thread_func, (void*)handle_tick);
-    if (!r) {
-        pthread_detach(tid);
+    if (! pthread_create(&thread, NULL, itimer_thread_func, (void*)handle_tick)) {
 #if HAVE_PTHREAD_SETNAME_NP
-        pthread_setname_np(tid, "ghc_ticker");
+        pthread_setname_np(thread, "ghc_ticker");
 #endif
+    } else {
+        sysErrorBelch("Itimer: Failed to spawn thread");
+        stg_exit(EXIT_FAILURE);
     }
 }
 
@@ -200,11 +201,20 @@ stopTicker(void)
 
 /* There may be at most one additional tick fired after a call to this */
 void
-exitTicker (rtsBool wait STG_UNUSED)
+exitTicker (rtsBool wait)
 {
     exited = 1;
     // ensure that ticker wakes up if stopped
     startTicker();
+
+    // wait for ticker to terminate if necessary
+    if (wait) {
+        if (pthread_join(thread, NULL)) {
+            sysErrorBelch("Itimer: Failed to join");
+        }
+    } else {
+        pthread_detach(thread);
+    }
 }
 
 int
