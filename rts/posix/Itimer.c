@@ -284,6 +284,26 @@ startTicker(void)
 {
     sysErrorBelch("startTicker\n");
 #if defined(USE_PTHREAD_FOR_ITIMER)
+    // There is a tricky race condition here when the ticker is stopped then
+    // immediately started again by another thread. To ensure the
+    // STOPPING-requestor doesn't livelock we need to wait until we transition
+    // to STOPPED. This was the cause of #11830.
+    switch (itimer_state) {
+    case RUNNING:
+        // already running, nothing to be done.
+        break;
+    case STOPPING:
+        while (itimer_state != STOPPED)
+            sched_yield();
+        // fall through
+    case STOPPED:
+        itimer_state = RUNNING;
+        break;
+    case EXITED:
+        sysErrorBelch("ITimer: Tried to start a dead timer!\n");
+        stg_exit(EXIT_FAILURE);
+    }
+
     itimer_state = RUNNING;
 #elif defined(USE_TIMER_CREATE)
     {
