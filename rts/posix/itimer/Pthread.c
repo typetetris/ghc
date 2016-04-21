@@ -81,8 +81,22 @@
 #endif
 
 static Time itimer_interval = DEFAULT_TICK_INTERVAL;
-enum ItimerState {STOPPED, RUNNING, STOPPING, EXITED};
+
+/*
+ * To keep things reasonably thread-safe we maintain the following invariants:
+ *
+ *  - The worker thread shall only read, not set the state.
+ *  - The user of the itimer shall only atomically set the state; shall not read
+ *    the state without taking the mutex.
+ */
+enum ItimerState {STOPPED, RUNNING, EXITED};
 static volatile enum ItimerState itimer_state = STOPPED;
+
+// Signaled when we want to (re)start the timer
+static pthread_cond_t start_cond;
+// Doesn't protect anything as updates to itimer_state are atomic.
+// Merely facilitates condition variable usage.
+static pthread_mutex_t mutex;
 
 static void *itimer_thread_func(void *_handle_tick)
 {
@@ -127,13 +141,16 @@ static void *itimer_thread_func(void *_handle_tick)
                 handle_tick(0);
                 break;
             case STOPPED:
-                break;
-            case STOPPING:
-                itimer_state = STOPPED;
+                // Wait until we are requested to restart
+                pthread_mutex_lock(&mutex);
+                pthread_cond_wait(&start_cond, &mutex);
+                pthread_mutex_unlock(&mutex);
                 break;
             case EXITED:
                 if (USE_TIMERFD_FOR_ITIMER)
                     close(timerfd);
+                pthread_mutex_destroy(&mutex);
+                pthread_cond_destroy(&start_cond);
                 return NULL;
         }
     }
@@ -144,6 +161,14 @@ void
 initTicker (Time interval, TickProc handle_tick)
 {
     itimer_interval = interval;
+
+    if (pthread_cond_init(&start_cond, NULL)) {
+        sysErrorBelch("Itimer: Failed to initialize condition variable");
+    }
+
+    if (pthread_mutex_init(&mutex, NULL)) {
+        sysErrorBelch("Itimer: Failed to initialize mutex");
+    }
 
     pthread_t tid;
     int r = pthread_create(&tid, NULL, itimer_thread_func, (void*)handle_tick);
@@ -158,24 +183,34 @@ initTicker (Time interval, TickProc handle_tick)
 void
 startTicker(void)
 {
-    // sanity check
-    if (itimer_state == EXITED) {
+    pthread_mutex_lock(&mutex);
+    switch(itimer_state) {
+    case EXITED:
+        // sanity check
         sysErrorBelch("ITimer: Tried to start a dead timer!\n");
         stg_exit(EXIT_FAILURE);
+
+    case RUNNING:
+        // already running, nothing to do here
+        break;
+
+    case STOPPED:
+        // set running state and wake up ticker thread
+        itimer_state = RUNNING;
+        pthread_cond_signal(&start_cond);
+        break;
     }
-    itimer_state = RUNNING;
+    pthread_mutex_unlock(&mutex);
 }
 
+/* There may be at most one additional tick fired after a call to this */
 void
 stopTicker(void)
 {
-    if (itimer_state == RUNNING) {
-        itimer_state = STOPPING;
-        // Note that the timer may fire once more, but that's okay;
-        // handle_tick is only called when itimer_state == RUNNING
-    }
+    itimer_state = STOPPED;
 }
 
+/* There may be at most one additional tick fired after a call to this */
 void
 exitTicker (rtsBool wait STG_UNUSED)
 {
