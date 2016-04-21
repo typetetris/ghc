@@ -82,20 +82,16 @@
 
 static Time itimer_interval = DEFAULT_TICK_INTERVAL;
 
-/*
- * To keep things reasonably thread-safe we maintain the following invariants:
- *
- *  - The worker thread shall only read, not set the state.
- *  - The user of the itimer shall only atomically set the state; shall not read
- *    the state without taking the mutex.
- */
-enum ItimerState {STOPPED, RUNNING, EXITED};
-static volatile enum ItimerState itimer_state = STOPPED;
+// Should we be firing ticks?
+// Writers to this must hold the mutex below.
+static volatile HsBool stopped = 0;
+
+// should the ticker thread exit?
+// This can be set without holding the mutex.
+static volatile HsBool exited = 1;
 
 // Signaled when we want to (re)start the timer
 static pthread_cond_t start_cond;
-// Doesn't protect anything as updates to itimer_state are atomic.
-// Merely facilitates condition variable usage.
 static pthread_mutex_t mutex;
 
 static void *itimer_thread_func(void *_handle_tick)
@@ -124,7 +120,7 @@ static void *itimer_thread_func(void *_handle_tick)
     }
 #endif
 
-    while (1) {
+    while (!exited) {
         if (USE_TIMERFD_FOR_ITIMER) {
             if (read(timerfd, &nticks, sizeof(nticks)) != sizeof(nticks)) {
                 if (errno != EINTR) {
@@ -136,38 +132,42 @@ static void *itimer_thread_func(void *_handle_tick)
                 sysErrorBelch("usleep(TimeToUS(itimer_interval) failed");
             }
         }
-        switch (itimer_state) {
-            case RUNNING:
-                handle_tick(0);
-                break;
-            case STOPPED:
-                // Wait until we are requested to restart
-                pthread_mutex_lock(&mutex);
+
+        // first try a cheap test
+        if (stopped) {
+            pthread_mutex_lock(&mutex);
+            // should we really stop?
+            if (stopped) {
                 pthread_cond_wait(&start_cond, &mutex);
-                pthread_mutex_unlock(&mutex);
-                break;
-            case EXITED:
-                if (USE_TIMERFD_FOR_ITIMER)
-                    close(timerfd);
-                pthread_mutex_destroy(&mutex);
-                pthread_cond_destroy(&start_cond);
-                return NULL;
+            }
+            pthread_mutex_unlock(&mutex);
+        } else {
+            handle_tick(0);
         }
     }
-    return NULL; // Never reached.
+
+    if (USE_TIMERFD_FOR_ITIMER)
+        close(timerfd);
+    pthread_mutex_destroy(&mutex);
+    pthread_cond_destroy(&start_cond);
+    return NULL;
 }
 
 void
 initTicker (Time interval, TickProc handle_tick)
 {
     itimer_interval = interval;
+    stopped = 0;
+    exited = 0;
 
     if (pthread_cond_init(&start_cond, NULL)) {
         sysErrorBelch("Itimer: Failed to initialize condition variable");
+        stg_exit(EXIT_FAILURE);
     }
 
     if (pthread_mutex_init(&mutex, NULL)) {
         sysErrorBelch("Itimer: Failed to initialize mutex");
+        stg_exit(EXIT_FAILURE);
     }
 
     pthread_t tid;
@@ -184,22 +184,8 @@ void
 startTicker(void)
 {
     pthread_mutex_lock(&mutex);
-    switch(itimer_state) {
-    case EXITED:
-        // sanity check
-        sysErrorBelch("ITimer: Tried to start a dead timer!\n");
-        stg_exit(EXIT_FAILURE);
-
-    case RUNNING:
-        // already running, nothing to do here
-        break;
-
-    case STOPPED:
-        // set running state and wake up ticker thread
-        itimer_state = RUNNING;
-        pthread_cond_signal(&start_cond);
-        break;
-    }
+    stopped = 0;
+    pthread_cond_signal(&start_cond);
     pthread_mutex_unlock(&mutex);
 }
 
@@ -207,14 +193,18 @@ startTicker(void)
 void
 stopTicker(void)
 {
-    itimer_state = STOPPED;
+    pthread_mutex_lock(&mutex);
+    stopped = 1;
+    pthread_mutex_unlock(&mutex);
 }
 
 /* There may be at most one additional tick fired after a call to this */
 void
 exitTicker (rtsBool wait STG_UNUSED)
 {
-    itimer_state = EXITED;
+    exited = 1;
+    // ensure that ticker wakes up if stopped
+    startTicker();
 }
 
 int
