@@ -343,7 +343,7 @@ static int ocGetNames_MachO       ( ObjectCode* oc );
 static int ocResolve_MachO        ( ObjectCode* oc );
 static int ocRunInit_MachO        ( ObjectCode* oc );
 
-#if (USE_MMAP == 0)
+#if defined(darwin_HOST_OS)
 static int machoGetMisalignment( FILE * );
 #endif
 #if NEED_SYMBOL_EXTRAS
@@ -7320,7 +7320,7 @@ machoInitSymbolsWithoutUnderscore(void)
 }
 #endif
 
-#if (USE_MMAP == 0)
+#if defined(darwin_HOST_OS)
 /*
  * Figure out by how much to shift the entire Mach-O file in memory
  * when loading so that its single segment ends up 16-byte-aligned
