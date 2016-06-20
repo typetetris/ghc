@@ -256,6 +256,51 @@ debugToMap :: [DebugBlock] -> LabelMap DebugBlock
 debugToMap = mapUnions . map go
    where go b = mapInsert (dblLabel b) b $ mapUnions $ map go (dblBlocks b)
 
+{-
+Note [What is this unwinding business?]
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+Unwinding tables are a variety of debugging information used by debugging tools
+to reconstruct the execution history of a program at runtime. These tables
+consist of sets of instructions, one for every point of the program, which
+describe how to reconstruct the state of the machine at the point where the
+current procedure was called.
+
+Currently we only bother to produce unwinding information for registers which
+are necessary to reconstructor flow-of-execution. On x86_64 this includes $rbp
+(which is the STG stack pointer) and $rsp.
+
+The flow of unwinding information is a bit convoluted:
+
+ * Unwinding nodes are initially created during code STG-to-C-- code generation.
+   In particular, StgCmmForeign produces an unwinding node describing the saving
+   and restoration of the thread state in the TSO over a safe foreign call.
+
+ * The unwinding nodes are carried through the C-- common-block elimination and
+   proc-point passes. Thankfully none of these passes should mess with nodes
+   that we created earlier, so no particular care is needed here.
+
+ * CmmLayoutStack produces an unwinding node for the Sp adjustment which it
+   inserts at the end of a block.
+
+ * The unwind nodes are carried through the sinking pass. This one is a little
+   delicate and in principle probably ought to learn to update unwinding nodes,
+   but in practice it doesn't seem to interfere.
+
+ * Eventually we make it to the code generator backend which can then preserve
+   the unwind nodes in its machine-specific instructions. In so doing the
+   backend can also modify or add unwinding information; this is necessary, for
+   instance, in the case of x86_64, where adjustment of $rsp may be necessary
+   during calls to native foreign code.
+
+ * The NCG then retreives the final unwinding table for each block from the
+   backend with generateUnwindTable.
+
+ * This unwind information is then converted to, e.g., DWARF unwinding tables
+   and emitted in the final object.
+
+-}
+
 -- | A label associated with an 'UnwindTable'
 data UnwindPoint = UnwindPoint !Label !UnwindTable
 
