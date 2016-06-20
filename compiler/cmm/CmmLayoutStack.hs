@@ -527,8 +527,14 @@ makeFixupBlock dflags sp0 l stack tscope assigs
   | otherwise = do
     tmp_lbl <- newBlockId
     let sp_off = sp0 - sm_sp stack
+        maybeAddUnwind block
+          | debugLevel dflags > 0 = block `blockSnoc` CmmUnwind [(Sp, unwind_val)]
+          | otherwise             = block
+          where unwind_val = cmmOffset dflags (CmmReg spReg) (sm_sp stack)
         block = blockJoin (CmmEntry tmp_lbl tscope)
-                          (maybeAddSpAdj dflags sp_off (blockFromList assigs))
+                          (  maybeAddSpAdj dflags sp_off
+                           $ maybeAddUnwind
+                           $ blockFromList assigs )
                           (CmmBranch l)
     return (tmp_lbl, [block])
 
@@ -824,13 +830,9 @@ getAreaOff stackmaps (Young l) =
 
 maybeAddSpAdj :: DynFlags -> ByteOff -> Block CmmNode O O -> Block CmmNode O O
 maybeAddSpAdj _      0      block = block
-maybeAddSpAdj dflags sp_off block
-    -- Also add unwind instructions when Sp is modified within blocks
-  | debugLevel dflags > 0 = block `blockSnoc` CmmUnwind [(Sp, unwind_val)] `blockSnoc` adj
-  | otherwise             = block `blockSnoc` adj
+maybeAddSpAdj dflags sp_off block = block `blockSnoc` adj
   where
-    unwind_val = cmmOffset dflags (CmmReg spReg) (negate sp_off)
-    adj        = CmmAssign spReg (cmmOffset dflags (CmmReg spReg) sp_off)
+    adj = CmmAssign spReg (cmmOffset dflags (CmmReg spReg) sp_off)
 
 {-
 Sp(L) is the Sp offset on entry to block L relative to the base of the
