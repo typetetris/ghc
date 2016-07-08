@@ -561,11 +561,16 @@ This knowledge is encoded in the following functions.
 NB: The string must already be encoded!
 -}
 
+-- | Build an 'OccName' derived from another 'OccName'.
+--
+-- Note that the pieces of the name are passed in as a @[FastString]@ so that
+-- the whole name can be constructed with a single 'concatFS', minimizing
+-- unnecessary intermediate allocations.
 mk_deriv :: NameSpace
          -> FastString      -- ^ A prefix which distinguishes one sort of
                             -- derived name from another
          -> [FastString]    -- ^ The name we are deriving from in pieces which
-                            -- will be concatenated
+                            -- will be concatenated.
          -> OccName
 mk_deriv occ_sp sys_prefix str =
     mkOccNameFS occ_sp (concatFS $ sys_prefix : str)
