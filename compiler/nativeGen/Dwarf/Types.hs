@@ -454,7 +454,7 @@ pprUnwindExpr spIsCFA expr
         pprE (UwReg Sp i) | spIsCFA
                              = if i == 0
                                then pprByte dW_OP_call_frame_cfa
-                               else ppr (UwPlus (UwReg Sp 0) (UwConst i))
+                               else pprE (UwPlus (UwReg Sp 0) (UwConst i))
         pprE (UwReg g i)      = pprByte (dW_OP_breg0+dwarfGlobalRegNo plat g) $$
                                pprLEBInt i
         pprE (UwDeref u)      = pprE u $$ pprByte dW_OP_deref
