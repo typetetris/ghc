@@ -247,6 +247,7 @@ blockToFrame blk uws
 
 addDefaultUnwindings :: UnwindTable -> [UnwindPoint] -> [UnwindPoint]
 addDefaultUnwindings tbl pts =
-    [ UnwindPoint lbl (tbl `mappend` tbl')
+    [ UnwindPoint lbl (tbl' `mappend` tbl)
+      -- mappend is left-biased
     | UnwindPoint lbl tbl' <- pts
     ]
