@@ -59,9 +59,9 @@ data CmmNode e x where
     -- instructions for a debugger. This describes how to reconstruct
     -- the "old" value of a register if we want to navigate the stack
     -- up one frame. Having unwind information for @Sp@ will allow the
-    -- debugger to "walk" the stack. The label represents a pointer
-    -- to the current location in the generated code.
-  CmmUnwind :: [(GlobalReg, CmmExpr)] -> CmmNode O O
+    -- debugger to "walk" the stack. The expression may be 'Nothing'
+    -- which indicates that the given register can't be unwound.
+  CmmUnwind :: [(GlobalReg, Maybe CmmExpr)] -> CmmNode O O
 
   CmmAssign :: !CmmReg -> !CmmExpr -> CmmNode O O
     -- Assign to register
