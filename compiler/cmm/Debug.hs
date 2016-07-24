@@ -320,11 +320,12 @@ instance Outputable UnwindPoint where
       pprUw (g, expr) = ppr g <> char '=' <> ppr expr
 
 -- | Maps registers to expressions that yield their "old" values
--- further up the stack. Most interesting for the stack pointer Sp,
+-- further up the stack. Most interesting for the stack pointer @Sp@,
 -- but might be useful to document saved registers, too. The 'Label'
 -- gives the label in the generated block that this table is associated
--- with.
-type UnwindTable = Map.Map GlobalReg UnwindExpr
+-- with. Note a register's value will be 'Nothing' when the register's
+-- previous value cannot be reconstructed.
+type UnwindTable = Map.Map GlobalReg (Maybe UnwindExpr)
 
 -- | Expressions, used for unwind information
 data UnwindExpr = UwConst !Int                  -- ^ literal value
