@@ -5,4 +5,4 @@ GhcLibHcOpts += -g
 GhcLibHcOpts += -ddump-to-file -ddump-asm -ddump-cmm -ddump-debug -dppr-debug -O1
 GhcRtsHcOpts += -g
 BUILD_PROF_LIBS      = NO
-DYNAMIC_GHC_PROGRAMS =NO
+DYNAMIC_GHC_PROGRAMS = NO
