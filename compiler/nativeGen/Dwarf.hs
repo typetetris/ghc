@@ -217,11 +217,10 @@ procToFrame initUws blk
   = DwarfFrameProc { dwFdeProc    = dblCLabel blk
                    , dwFdeHasInfo = dblHasInfoTbl blk
                    , dwFdeBlocks  = map (uncurry blockToFrame)
-                                        (first setHasInfo blockUw0 : blockUws)
+                                        (setHasInfo blockUws)
                    }
   where blockUws :: [(DebugBlock, [UnwindPoint])]
-        blockUw0:blockUws =
-          map snd $ sortBy (comparing fst) $ flatten blk
+        blockUws = map snd $ sortBy (comparing fst) $ flatten blk
 
         flatten :: DebugBlock
                 -> [(Int, (DebugBlock, [UnwindPoint]))]
@@ -235,9 +234,14 @@ procToFrame initUws blk
         -- its first block has one to ensure that it gets the necessary -1
         -- offset applied to its start address.
         -- See Note [Info Offset] in Dwarf.Types.
-        setHasInfo :: DebugBlock -> DebugBlock
-        setHasInfo child =
-            child { dblHasInfoTbl = dblHasInfoTbl child || dblHasInfoTbl blk }
+        setHasInfo :: [(DebugBlock, [UnwindPoint])]
+                   -> [(DebugBlock, [UnwindPoint])]
+        setHasInfo [] = []
+        setHasInfo (c0:cs) = first setIt c0 : cs
+          where
+            setIt child =
+              child { dblHasInfoTbl = dblHasInfoTbl child
+                                      || dblHasInfoTbl blk }
 
 blockToFrame :: DebugBlock -> [UnwindPoint] -> DwarfFrameBlock
 blockToFrame blk uws
