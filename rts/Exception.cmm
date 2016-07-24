@@ -368,6 +368,7 @@ INFO_TABLE_RET(stg_catch_frame, CATCH_FRAME,
                                   exceptions_blocked,handler))
     return (P_ ret)
 {
+    unwind Sp = Sp + WDS(3);
     return (ret);
 }
 
