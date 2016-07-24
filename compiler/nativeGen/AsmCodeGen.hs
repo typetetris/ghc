@@ -686,7 +686,8 @@ cmmNativeGen dflags this_mod modLoc ncgImpl us fileIds dbgMap cmm count
                 (vcat $ map (pprNatCmmDecl ncgImpl) expanded)
 
         -- generate unwinding information from cmm
-        let unwinds =
+        let unwinds :: BlockMap [UnwindPoint]
+            unwinds =
                 {-# SCC "unwindingInfo" #-}
                 foldl' (\acc proc -> acc `mapUnion` computeUnwinding dflags ncgImpl proc)
                        emptyBlockMap expanded
