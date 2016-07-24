@@ -76,6 +76,7 @@ instance Outputable DebugBlock where
             (maybe empty ppr (dblSourceTick blk)) <+>
             (maybe (text "removed") ((text "pos " <>) . ppr)
                    (dblPosition blk)) <+>
+            (ppr (dblUnwind blk)) <+>
             (if null (dblBlocks blk) then empty else ppr (dblBlocks blk))
 
 -- | Intermediate data structure holding debug-relevant context information
