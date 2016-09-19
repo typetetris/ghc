@@ -1004,7 +1004,7 @@ tyConAppTyCon ty = tyConAppTyCon_maybe ty `orElse` pprPanic "tyConAppTyCon" (ppr
 tyConAppArgs_maybe :: Type -> Maybe [Type]
 tyConAppArgs_maybe ty | Just ty' <- coreView ty = tyConAppArgs_maybe ty'
 tyConAppArgs_maybe (TyConApp _ tys) = Just tys
-tyConAppArgs_maybe (FunTy arg res)  = Just [arg,res]
+tyConAppArgs_maybe (FunTy arg res)  = Just [typeKind arg, typeKind res, arg, res]
 tyConAppArgs_maybe _                = Nothing
 
 tyConAppArgs :: Type -> [Type]
