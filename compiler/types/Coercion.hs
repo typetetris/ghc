@@ -119,7 +119,7 @@ import Unique
 import Pair
 import SrcLoc
 import PrelNames
-import TysPrim          ( eqPhantPrimTyCon )
+import TysPrim          ( eqPhantPrimTyCon, tYPETyCon )
 import ListSetOps
 import Maybes
 import UniqFM
@@ -261,7 +261,7 @@ ppr_fun_co :: TyPrec -> Coercion -> SDoc
 ppr_fun_co p co = pprArrowChain p (split co)
   where
     split :: Coercion -> [SDoc]
-    split (TyConAppCo _ f [arg, res])
+    split (TyConAppCo _ f [_, _, arg, res])
       | f `hasKey` funTyConKey
       = ppr_co FunPrec arg : split res
     split co = [ppr_co TopPrec co]
@@ -575,7 +575,20 @@ mkTyConAppCo r tc cos
 
 -- | Make a function 'Coercion' between two other 'Coercion's
 mkFunCo :: Role -> Coercion -> Coercion -> Coercion
-mkFunCo r co1 co2 = mkTyConAppCo r funTyCon [co1, co2]
+mkFunCo r co1 co2 =
+    mkTyConAppCo r funTyCon [mkRuntimeRepCo co1, mkRuntimeRepCo co2, co1, co2]
+  where
+    -- for each co :: (t1 :: TYPE r1) ~ (t2 :: TYPE r2)
+    -- we need rep_co :: r1 ~ r2
+    mkRuntimeRepCo :: Coercion -> Coercion
+    mkRuntimeRepCo co
+      | Just (tc, [rep]) <- splitTyConAppCo_maybe $ mkKindCo co
+      , tc == tYPETyCon
+      = rep
+      | otherwise
+      = pprPanic "mkFunCo.mkRuntimeRepCo"
+                 (ppr co $$ ppr co1 <+> arrow <+> ppr co2)
+
 
 -- | Make nested function 'Coercion's
 mkFunCos :: Role -> [Coercion] -> Coercion -> Coercion
