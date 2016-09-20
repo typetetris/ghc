@@ -1270,12 +1270,11 @@ ty_co_match menv subst ty1 (AppCo co2 arg2) _lkco _rkco
 ty_co_match menv subst (TyConApp tc1 tys) (TyConAppCo _ tc2 cos) _lkco _rkco
   = ty_co_match_tc menv subst tc1 tys tc2 cos
 ty_co_match menv subst (FunTy ty1 ty2) (TyConAppCo _ tc cos) _lkco _rkco
-  | Just rep1 <- kindRuntimeRep_maybe ty1
-  , Just rep2 <- kindRuntimeRep_maybe ty2
-  = ty_co_match_tc menv subst funTyCon [rep1, rep2, ty1, ty2] tc cos
-  | otherwise
-  = pprPanic "ty_co_match" (ppr ty1 <+> arrow <+> ppr ty2
-                            $$ ppr tc <+> hsep (map ppr cos))
+    -- Despite the fact that (->) is polymorphic in four type variables (two
+    -- runtime rep and two types), we shouldn't need to explicitly unify the
+    -- runtime reps here; unifying the types themselves should be sufficient.
+    -- See Note [Representation of function types].
+  = ty_co_match_tc menv subst funTyCon [ty1, ty2] tc cos
 
 ty_co_match menv subst (ForAllTy (TvBndr tv1 _) ty1)
                        (ForAllCo tv2 kind_co2 co2)
