@@ -1197,7 +1197,7 @@ instCoercion (Pair lty rty) g w
   , Just w' <- setNominalRole_maybe w
   = Just $ mkInstCo g w'
   | isFunTy lty && isFunTy rty
-  = Just $ mkNthCo 1 g -- extract result type, which is the 2nd argument to (->)
+  = Just $ mkNthCo 3 g -- extract result type, which is the 4th argument to (->)
   | otherwise -- one forall, one funty...
   = Nothing
   where
