@@ -573,7 +573,8 @@ mkTyConAppCo r tc cos
 
   | otherwise = TyConAppCo r tc cos
 
--- | Make a function 'Coercion' between two other 'Coercion's
+-- | Make a function 'Coercion' between two other 'Coercion's. That is,
+-- given @co1 :: a ~ b@ and @co2 :: x ~ y@ produce @co :: (a -> x) ~ (b -> y)@.
 mkFunCo :: Role -> Coercion -> Coercion -> Coercion
 mkFunCo r co1 co2 =
     mkTyConAppCo r funTyCon [mkRuntimeRepCo co1, mkRuntimeRepCo co2, co1, co2]
@@ -581,7 +582,8 @@ mkFunCo r co1 co2 =
     -- for each co :: (t1 :: TYPE r1) ~ (t2 :: TYPE r2)
     -- we need rep_co :: r1 ~ r2
     mkRuntimeRepCo :: Coercion -> Coercion
-    mkRuntimeRepCo = mkNthCo 0 . mkKindCo
+    mkRuntimeRepCo =
+        mkNthCoRole r 0 . mkKindCo
 
 
 -- | Make nested function 'Coercion's
