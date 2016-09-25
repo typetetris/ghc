@@ -972,8 +972,10 @@ applyTysX tvs body_ty arg_tys
 -- its arguments.  Applies its arguments to the constructor from left to right.
 mkTyConApp :: TyCon -> [Type] -> Type
 mkTyConApp tycon tys
-  | isFunTyCon tycon, [_rep1,_rep2,ty1,ty2] <- tys
-  = FunTy ty1 ty2
+  | isFunTyCon tycon
+  = case tys of
+      [_rep1,_rep2,ty1,ty2] -> FunTy ty1 ty2
+      _                     -> pprPanic "mkTyConApp" (ppr tys)
 
   | otherwise
   = TyConApp tycon tys
