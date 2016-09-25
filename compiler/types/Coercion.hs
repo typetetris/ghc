@@ -573,17 +573,23 @@ mkTyConAppCo r tc cos
 
   | otherwise = TyConAppCo r tc cos
 
+-- | For a constraint @co :: (a :: TYPE rep1) ~ (b :: TYPE rep2)@ produce
+-- @co' :: rep1 ~ rep2@.
+mkRuntimeRepCo :: Role -> Coercion -> Coercion
+mkRuntimeRepCo r co = mkNthCoRole r 0 $ mkKindCo co
+
 -- | Make a function 'Coercion' between two other 'Coercion's. That is,
 -- given @co1 :: a ~ b@ and @co2 :: x ~ y@ produce @co :: (a -> x) ~ (b -> y)@.
 mkFunCo :: Role -> Coercion -> Coercion -> Coercion
 mkFunCo r co1 co2 =
-    mkTyConAppCo r funTyCon [mkRuntimeRepCo co1, mkRuntimeRepCo co2, co1, co2]
-  where
+    mkTyConAppCo r funTyCon
+    [ mkRuntimeRepCo co1 -- ra ~ rx where a :: TYPE ra, x :: TYPE rx
+    , mkRuntimeRepCo co2 -- rb ~ ry where b :: TYPE rb, y :: TYPE ry
+    , co1                -- a ~ x
+    , co2                -- b ~ y
+    ]
     -- for each co :: (t1 :: TYPE r1) ~ (t2 :: TYPE r2)
     -- we need rep_co :: r1 ~ r2
-    mkRuntimeRepCo :: Coercion -> Coercion
-    mkRuntimeRepCo =
-        mkNthCoRole r 0 . mkKindCo
 
 
 -- | Make nested function 'Coercion's
