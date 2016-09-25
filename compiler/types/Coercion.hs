@@ -924,6 +924,7 @@ infixl 5 `mkCoherenceCo`
 infixl 5 `mkCoherenceRightCo`
 infixl 5 `mkCoherenceLeftCo`
 
+-- | Given @co :: (a :: k) ~ (b :: k')@ produce @co' :: k ~ k'@.
 mkKindCo :: Coercion -> Coercion
 mkKindCo (Refl _ ty) = Refl Nominal (typeKind ty)
 mkKindCo (UnivCo (PhantomProv h) _ _ _)    = h
@@ -1225,6 +1226,9 @@ castCoercionKind g h1 h2
 mkPiCos :: Role -> [Var] -> Coercion -> Coercion
 mkPiCos r vs co = foldr (mkPiCo r) co vs
 
+-- | Make a 'Coercion' quantified over either a type variable or
+-- lambda-bound variable.
+-- TODO: Check this
 mkPiCo  :: Role -> Var -> Coercion -> Coercion
 mkPiCo r v co | isTyVar v = mkHomoForAllCos [v] co
               | otherwise = mkFunCo r (mkReflCo r (varType v)) co
