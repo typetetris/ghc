@@ -1200,7 +1200,7 @@ simplCast env body co0 cont0
            -- we split coercion t1->t2 ~ s1->s2 into t1 ~ s1 and
            -- t2 ~ s2 with left and right on the curried form:
            --    (->) t1 t2 ~ (->) s1 s2
-           [co1, co2] = decomposeCo 2 co
+           [co_rep1, co_rep2, co1, co2] = decomposeCo 4 co
 
        add_coerce co _ cont = return (CastIt co cont)
 
