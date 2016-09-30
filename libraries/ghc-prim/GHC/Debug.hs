@@ -21,11 +21,17 @@ debugErrLn xs = IO (\s0 ->
                         case c_debugErrLn mba of
                         IO f -> f s1)
 
-foreign import ccall unsafe "debugLn"
-    c_debugLn :: MutableByteArray# RealWorld -> IO ()
+c_debugLn :: MutableByteArray# RealWorld -> IO ()
+c_debugLn _ = IO (\s -> (# s, () #)
 
-foreign import ccall unsafe "debugErrLn"
-    c_debugErrLn :: MutableByteArray# RealWorld -> IO ()
+c_debugErrLn :: MutableByteArray# RealWorld -> IO ()
+c_debugErrLn _ = IO $ \s -> (# s, () #)
+
+--foreign import ccall unsafe "debugLn"
+--    c_debugLn :: MutableByteArray# RealWorld -> IO ()
+--
+--foreign import ccall unsafe "debugErrLn"
+--    c_debugErrLn :: MutableByteArray# RealWorld -> IO ()
 
 mkMBA :: State# RealWorld -> [Char] ->
          (# State# RealWorld, MutableByteArray# RealWorld #)

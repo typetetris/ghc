@@ -1190,8 +1190,9 @@ simplCast env body co0 cont0
                 -- But it isn't a common case.
                 --
                 -- Example of use: Trac #995
-         = do { (dup', arg_se', arg') <- simplArg env dup arg_se arg
-              ; cont'                <- addCoerce co2 cont
+         = pprTrace "simplCast:push" (hang (text "s1s2") 4 (ppr s1s2) $$ hang (text "t1t2") 4 (ppr t1t2) $$ hang (text "co") 4 (ppr co)) $
+           do { (dup', arg_se', arg') <- simplArg env dup arg_se arg
+              ; cont'                 <- addCoerce co2 cont
               ; return (ApplyToVal { sc_arg  = mkCast arg' (mkSymCo co1)
                                    , sc_env  = arg_se'
                                    , sc_dup  = dup'

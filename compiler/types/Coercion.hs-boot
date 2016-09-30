@@ -1,3 +1,5 @@
+{-# LANGUAGE FlexibleContexts #-}
+
 module Coercion where
 
 import {-# SOURCE #-} TyCoRep
@@ -7,6 +9,7 @@ import CoAxiom
 import Var
 import Outputable
 import Pair
+import Util
 
 mkReflCo :: Role -> Type -> Coercion
 mkTyConAppCo :: Role -> TyCon -> [Coercion] -> Coercion
@@ -19,7 +22,7 @@ mkUnsafeCo :: Role -> Type -> Type -> Coercion
 mkUnivCo :: UnivCoProvenance -> Role -> Type -> Type -> Coercion
 mkSymCo :: Coercion -> Coercion
 mkTransCo :: Coercion -> Coercion -> Coercion
-mkNthCo :: Int -> Coercion -> Coercion
+mkNthCo :: HasCallStack => Int -> Coercion -> Coercion
 mkLRCo :: LeftOrRight -> Coercion -> Coercion
 mkInstCo :: Coercion -> Coercion -> Coercion
 mkCoherenceCo :: Coercion -> Coercion -> Coercion

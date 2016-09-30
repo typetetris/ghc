@@ -2685,7 +2685,7 @@ ppr_sigma_type _ _ ty
     -- We don't want to lose synonyms, so we mustn't use splitFunTys here.
 ppr_fun_tail :: Type -> [SDoc]
 ppr_fun_tail (FunTy ty1 ty2)
-  | not (isPredTy ty1) = ppr_type FunPrec ty1 : ppr_fun_tail ty2
+  | not (isPredTy ty1) = (text "fun" <+> ppr_type FunPrec ty1) : ppr_fun_tail ty2
 ppr_fun_tail other_ty = [ppr_type TopPrec other_ty]
 
 pprSigmaType :: Type -> SDoc

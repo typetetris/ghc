@@ -7,6 +7,7 @@ Utility functions on @Core@ syntax
 -}
 
 {-# LANGUAGE CPP #-}
+{-# LANGUAGE FlexibleContexts #-}
 
 -- | Commonly useful utilites for manipulating the Core language
 module CoreUtils (
@@ -204,7 +205,7 @@ applyTypeToArgs e op_ty args
 
 -- | Wrap the given expression in the coercion safely, dropping
 -- identity coercions and coalescing nested coercions
-mkCast :: CoreExpr -> Coercion -> CoreExpr
+mkCast :: HasDebugCallStack => CoreExpr -> Coercion -> CoreExpr
 mkCast e co
   | ASSERT2( coercionRole co == Representational
            , text "coercion" <+> ppr co <+> ptext (sLit "passed to mkCast")
@@ -234,9 +235,11 @@ mkCast (Tick t expr) co
 mkCast expr co
   = let Pair from_ty _to_ty = coercionKind co in
     WARN( not (from_ty `eqType` exprType expr),
-          text "Trying to coerce" <+> text "(" <> ppr expr
-          $$ text "::" <+> ppr (exprType expr) <> text ")"
-          $$ ppr co $$ ppr (coercionType co) )
+          pprSTrace (text "mkCast")
+          $ text "Trying to coerce" <+> text "(" <> ppr expr
+          $$ nest 4 (dcolon <+> ppr (exprType expr) <> text ")")
+          $$ text "coercion:" <+> ppr co
+          $$ nest 4 (dcolon <+> ppr (coercionType co)) )
     (Cast expr co)
 
 -- | Wraps the given expression in the source annotation, dropping the

@@ -582,6 +582,7 @@ mkRuntimeRepCo r co = mkNthCoRole r 0 $ mkKindCo co
 -- given @co1 :: a ~ b@ and @co2 :: x ~ y@ produce @co :: (a -> x) ~ (b -> y)@.
 mkFunCo :: Role -> Coercion -> Coercion -> Coercion
 mkFunCo r co1 co2 =
+    pprTrace "mkFunCo" (ppr co1 $$ ppr co2) $
     mkTyConAppCo r funTyCon
     [ mkRuntimeRepCo co1 -- ra ~ rx where a :: TYPE ra, x :: TYPE rx
     , mkRuntimeRepCo co2 -- rb ~ ry where b :: TYPE rb, y :: TYPE ry
@@ -866,14 +867,14 @@ mkTransCo co1 co2       = TransCo co1 co2
 
 -- the Role is the desired one. It is the caller's responsibility to make
 -- sure this request is reasonable
-mkNthCoRole :: Role -> Int -> Coercion -> Coercion
+mkNthCoRole :: HasCallStack => Role -> Int -> Coercion -> Coercion
 mkNthCoRole role n co
   = downgradeRole role nth_role $ nth_co
   where
     nth_co = mkNthCo n co
     nth_role = coercionRole nth_co
 
-mkNthCo :: Int -> Coercion -> Coercion
+mkNthCo :: HasCallStack => Int -> Coercion -> Coercion
 mkNthCo 0 (Refl _ ty)
   | Just (tv, _) <- splitForAllTy_maybe ty
   = Refl Nominal (tyVarKind tv)
@@ -885,7 +886,7 @@ mkNthCo n (Refl r ty)
 
         ok_tc_app :: Type -> Int -> Bool
         ok_tc_app ty n
-          | Just (_, tys) <- splitTyConApp_maybe ty
+          | Just (_, tys) <- pprTrace "mkNthCo" (ppr $ splitTyConApp_maybe ty) $ splitTyConApp_maybe ty
           = tys `lengthExceeds` n
           | isForAllTy ty  -- nth:0 pulls out a kind coercion from a hetero forall
           = n == 0

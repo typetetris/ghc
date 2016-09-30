@@ -637,8 +637,9 @@ lintCoreExpr (Var var)
 lintCoreExpr (Lit lit)
   = return (literalType lit)
 
-lintCoreExpr (Cast expr co)
-  = do { expr_ty <- lintCoreExpr expr
+lintCoreExpr e@(Cast expr co)
+  = addLoc (AnExpr e)
+  $ do { expr_ty <- lintCoreExpr expr
        ; co' <- applySubstCo co
        ; (_, k2, from_ty, to_ty, r) <- lintCoercion co'
        ; lintL (classifiesTypeWithValues k2)
