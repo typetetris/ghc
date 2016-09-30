@@ -584,10 +584,10 @@ mkFunCo :: Role -> Coercion -> Coercion -> Coercion
 mkFunCo r co1 co2 =
     pprTrace "mkFunCo" (ppr co1 $$ ppr co2) $
     mkTyConAppCo r funTyCon
-    [ mkRuntimeRepCo co1 -- ra ~ rx where a :: TYPE ra, x :: TYPE rx
-    , mkRuntimeRepCo co2 -- rb ~ ry where b :: TYPE rb, y :: TYPE ry
-    , co1                -- a ~ x
-    , co2                -- b ~ y
+    [ mkRuntimeRepCo r co1 -- ra ~ rx where a :: TYPE ra, x :: TYPE rx
+    , mkRuntimeRepCo r co2 -- rb ~ ry where b :: TYPE rb, y :: TYPE ry
+    , co1                  -- a ~ x
+    , co2                  -- b ~ y
     ]
     -- for each co :: (t1 :: TYPE r1) ~ (t2 :: TYPE r2)
     -- we need rep_co :: r1 ~ r2
