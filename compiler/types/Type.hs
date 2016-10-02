@@ -973,9 +973,8 @@ applyTysX tvs body_ty arg_tys
 mkTyConApp :: TyCon -> [Type] -> Type
 mkTyConApp tycon tys
   | isFunTyCon tycon
-  = case tys of
-      [_rep1,_rep2,ty1,ty2] -> FunTy ty1 ty2
-      _                     -> pprPanic "mkTyConApp" (ppr tys)
+  , [_rep1,_rep2,ty1,ty2] <- tys
+  = FunTy ty1 ty2
 
   | otherwise
   = TyConApp tycon tys
