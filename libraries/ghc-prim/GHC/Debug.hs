@@ -22,10 +22,10 @@ debugErrLn xs = IO (\s0 ->
                         IO f -> f s1)
 
 c_debugLn :: MutableByteArray# RealWorld -> IO ()
-c_debugLn _ = IO (\s -> (# s, () #)
+c_debugLn _ = IO (\s -> (# s, () #))
 
 c_debugErrLn :: MutableByteArray# RealWorld -> IO ()
-c_debugErrLn _ = IO $ \s -> (# s, () #)
+c_debugErrLn _ = IO (\s -> (# s, () #))
 
 --foreign import ccall unsafe "debugLn"
 --    c_debugLn :: MutableByteArray# RealWorld -> IO ()

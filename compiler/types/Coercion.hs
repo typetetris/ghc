@@ -576,13 +576,21 @@ mkTyConAppCo r tc cos
 -- | For a constraint @co :: (a :: TYPE rep1) ~ (b :: TYPE rep2)@ produce
 -- @co' :: rep1 ~ rep2@.
 mkRuntimeRepCo :: Role -> Coercion -> Coercion
-mkRuntimeRepCo r co = mkNthCoRole r 0 $ mkKindCo co
+mkRuntimeRepCo r co =
+    ASSERT2( is_TYPE_app, ppr co )
+    mkNthCoRole r 0 $ mkKindCo co
+  where
+    is_TYPE_app
+      | Just (tycon, [co]) <- splitTyConAppCo_maybe $ mkKindCo co
+      = tycon == tYPETyCon
+      | otherwise
+      = False
 
--- | Make a function 'Coercion' between two other 'Coercion's. That is,
+-- | Build a function 'Coercion' from two other 'Coercion's. That is,
 -- given @co1 :: a ~ b@ and @co2 :: x ~ y@ produce @co :: (a -> x) ~ (b -> y)@.
 mkFunCo :: Role -> Coercion -> Coercion -> Coercion
 mkFunCo r co1 co2 =
-    pprTrace "mkFunCo" (ppr co1 $$ ppr co2) $
+    pprTrace "mkFunCo" (ppr r $$ ppr co1 $$ ppr co2) $
     mkTyConAppCo r funTyCon
     [ mkRuntimeRepCo r co1 -- ra ~ rx where a :: TYPE ra, x :: TYPE rx
     , mkRuntimeRepCo r co2 -- rb ~ ry where b :: TYPE rb, y :: TYPE ry
@@ -879,14 +887,14 @@ mkNthCo 0 (Refl _ ty)
   | Just (tv, _) <- splitForAllTy_maybe ty
   = Refl Nominal (tyVarKind tv)
 mkNthCo n (Refl r ty)
-  = ASSERT2( ok_tc_app ty n, ppr n $$ ppr ty )
+  = ASSERT2( ok_tc_app ty n, pprTrace "mkNthCo" (ppr $ splitTyConApp_maybe ty) $ ppr n $$ ppr ty )
     mkReflCo r' (tyConAppArgN n ty)
   where tc = tyConAppTyCon ty
         r' = nthRole r tc n
 
         ok_tc_app :: Type -> Int -> Bool
         ok_tc_app ty n
-          | Just (_, tys) <- pprTrace "mkNthCo" (ppr $ splitTyConApp_maybe ty) $ splitTyConApp_maybe ty
+          | Just (_, tys) <- splitTyConApp_maybe ty
           = tys `lengthExceeds` n
           | isForAllTy ty  -- nth:0 pulls out a kind coercion from a hetero forall
           = n == 0
