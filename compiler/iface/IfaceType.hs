@@ -787,15 +787,14 @@ ppr_iface_sigma_type show_foralls_unconditionally ty
     (tvs, theta, tau) = splitIfaceSigmaTy ty
 
 -------------------
-pprIfaceForAllPart :: [IfaceForAllBndr] -> [IfaceType] -> SDoc -> SDoc
+pprIfaceForAllPart :: [IfaceForAllBndr] -> [IfacePredType] -> SDoc -> SDoc
 pprIfaceForAllPart tvs ctxt sdoc = ppr_iface_forall_part False tvs ctxt sdoc
 
 pprIfaceForAllCoPart :: [(IfLclName, IfaceCoercion)] -> SDoc -> SDoc
 pprIfaceForAllCoPart tvs sdoc = sep [ pprIfaceForAllCo tvs
                                     , sdoc ]
 
-ppr_iface_forall_part :: Outputable a
-                      => Bool -> [IfaceForAllBndr] -> [a] -> SDoc -> SDoc
+ppr_iface_forall_part :: Bool -> [IfaceForAllBndr] -> [IfacePredType] -> SDoc -> SDoc
 ppr_iface_forall_part show_foralls_unconditionally tvs ctxt sdoc
   = sep [ if show_foralls_unconditionally
           then pprIfaceForAll tvs
@@ -1174,9 +1173,10 @@ instance Binary IfaceTcArgs where
 -------------------
 
 -- | Prints "(C a, D b) =>", including the arrow
-pprIfaceContextArr :: Outputable a => [a] -> SDoc
+pprIfaceContextArr :: [IfacePredType] -> SDoc
 pprIfaceContextArr = maybe empty (<+> darrow) . pprIfaceContextMaybe
 
+-- | Prints a context or @()@ if empty.
 pprIfaceContext :: Outputable a => [a] -> SDoc
 pprIfaceContext = fromMaybe (parens empty) . pprIfaceContextMaybe
 

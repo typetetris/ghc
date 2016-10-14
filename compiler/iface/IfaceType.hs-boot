@@ -9,6 +9,7 @@ import FastString (FastString)
 
 type IfLclName = FastString
 type IfaceKind = IfaceType
+type IfacePredType = IfaceType
 
 data IfaceType
 data IfaceTyCon
@@ -28,7 +29,7 @@ pprIfaceForAll :: [IfaceForAllBndr] -> SDoc
 pprIfaceTvBndr :: Bool -> IfaceTvBndr -> SDoc
 pprUserIfaceForAll :: [IfaceForAllBndr] -> SDoc
 pprIfaceContext :: Outputable a => [a] -> SDoc
-pprIfaceContextArr :: Outputable a => [a] -> SDoc
+pprIfaceContextArr :: [IfacePredType] -> SDoc
 pprIfaceTypeApp :: TyPrec -> IfaceTyCon -> IfaceTcArgs -> SDoc
 pprIfaceCoTcApp :: TyPrec -> IfaceTyCon -> [IfaceCoercion] -> SDoc
 pprTyTcApp :: TyPrec -> IfaceTyCon -> IfaceTcArgs -> SDoc
