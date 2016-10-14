@@ -959,7 +959,8 @@ pprTyTcApp' :: TyPrec -> IfaceTyCon -> IfaceTcArgs -> DynFlags -> SDoc
 pprTyTcApp' ctxt_prec tc tys dflags
   | ifaceTyConName tc `hasKey` ipClassKey
   , ITC_Vis (IfaceLitTy (IfaceStrTyLit n)) (ITC_Vis ty ITC_Nil) <- tys
-  = parens $ char '?' <> ftext n <> text "::" <> ppr_ty TopPrec ty
+  = maybeParen ctxt_prec FunPrec
+    $ char '?' <> ftext n <> text "::" <> ppr_ty TopPrec ty
 
   | ifaceTyConName tc == consDataConName
   , not (gopt Opt_PrintExplicitKinds dflags)
