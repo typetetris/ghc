@@ -41,7 +41,7 @@ module IfaceType (
 
         -- Printing
         pprIfaceType, pprParendIfaceType,
-        pprIfaceContext, pprIfaceContextArr, pprIfaceContextMaybe,
+        pprIfaceContext, pprIfaceContextArr,
         pprIfaceIdBndr, pprIfaceLamBndr, pprIfaceTvBndr, pprIfaceTyConBinders,
         pprIfaceBndrs, pprIfaceTcArgs, pprParendIfaceTcArgs,
         pprIfaceForAllPart, pprIfaceForAll, pprIfaceSigmaType,
@@ -80,7 +80,6 @@ import FastString
 import FastStringEnv
 import UniqSet
 import VarEnv
-import Data.Maybe
 import UniqFM
 import Util
 
@@ -838,8 +837,8 @@ pprIfaceForAllBndr :: IfaceForAllBndr -> SDoc
 pprIfaceForAllBndr (TvBndr tv Inferred) = sdocWithDynFlags $ \dflags ->
                                            if gopt Opt_PrintExplicitForalls dflags
                                            then braces $ pprIfaceTvBndr False tv
-                                           else pprIfaceTvBndr False tv
-pprIfaceForAllBndr (TvBndr tv _)        = pprIfaceTvBndr False tv
+                                           else pprIfaceTvBndr True tv
+pprIfaceForAllBndr (TvBndr tv _)        = pprIfaceTvBndr True tv
 
 pprIfaceForAllCoBndr :: (IfLclName, IfaceCoercion) -> SDoc
 pprIfaceForAllCoBndr (tv, kind_co)
@@ -966,7 +965,7 @@ ppr_equality tc args
       = if tc_name `hasKey` eqReprPrimTyConKey
         then text "Coercible"
              <+> sep [ pp TyConPrec ty1, pp TyConPrec ty2 ]
-        else sep [pp TyConPrec ty1, char '~', pp TyOpPrec ty2]
+        else sep [pp TyOpPrec ty1, char '~', pp TyOpPrec ty2]
       where
         ppr_infix_eq eq_op
            = sep [ parens (pp TyOpPrec ty1 <+> dcolon <+> pp TyOpPrec ki1)
@@ -1172,44 +1171,50 @@ instance Binary IfaceTcArgs where
 
 -------------------
 
--- | Prints "(C a, D b) =>", including the arrow
+-- Some notes about printing contexts
+--
+-- In the event that we are printing a singleton context (e.g. @Eq a@) we can omit
+-- parentheses. However, we must take care to set the precedence correctly to
+-- TyOpPrec, since something like @a :~: b@ must be parenthesized (see #9658).
+--
+-- When printing a larger context we use 'fsep' instead of 'sep' so that
+-- the context doesn't get displayed as a giant column. Rather than,
+--  instance (Eq a,
+--            Eq b,
+--            Eq c,
+--            Eq d,
+--            Eq e,
+--            Eq f,
+--            Eq g,
+--            Eq h,
+--            Eq i,
+--            Eq j,
+--            Eq k,
+--            Eq l) =>
+--           Eq (a, b, c, d, e, f, g, h, i, j, k, l)
+--
+-- we want
+--
+--  instance (Eq a, Eq b, Eq c, Eq d, Eq e, Eq f, Eq g, Eq h, Eq i,
+--            Eq j, Eq k, Eq l) =>
+--           Eq (a, b, c, d, e, f, g, h, i, j, k, l)
+
+
+
+-- | Prints "(C a, D b) =>", including the arrow. This is used when we want to
+-- print a context in a type.
 pprIfaceContextArr :: [IfacePredType] -> SDoc
-pprIfaceContextArr = maybe empty (<+> darrow) . pprIfaceContextMaybe
+pprIfaceContextArr []     = empty
+pprIfaceContextArr [pred] = ppr_ty TyOpPrec pred <+> darrow
+pprIfaceContextArr preds  =
+    parens (fsep (punctuate comma (map ppr preds))) <+> darrow
 
--- | Prints a context or @()@ if empty.
-pprIfaceContext :: Outputable a => [a] -> SDoc
-pprIfaceContext = fromMaybe (parens empty) . pprIfaceContextMaybe
-
--- | Print a context or nothing if empty (e.g. @(Eq a, Ord b)@)
-pprIfaceContextMaybe :: Outputable a => [a] -> Maybe SDoc
-pprIfaceContextMaybe []     = Nothing
-pprIfaceContextMaybe [pred] = Just $ ppr pred -- No parens
-                         -- TyOpPrec:  Num a     => a -> a  does not need parens
-                         --      bug   (a :~: b) => a -> b  currently does
-                         -- Trac # 9658
-pprIfaceContextMaybe preds  =
-    Just $ parens (fsep (punctuate comma (map ppr preds)))
-    -- Notice 'fsep' here rather that 'sep', so that
-    -- type contexts don't get displayed in a giant column
-    -- Rather than
-    --  instance (Eq a,
-    --            Eq b,
-    --            Eq c,
-    --            Eq d,
-    --            Eq e,
-    --            Eq f,
-    --            Eq g,
-    --            Eq h,
-    --            Eq i,
-    --            Eq j,
-    --            Eq k,
-    --            Eq l) =>
-    --           Eq (a, b, c, d, e, f, g, h, i, j, k, l)
-    -- we get
-    --
-    --  instance (Eq a, Eq b, Eq c, Eq d, Eq e, Eq f, Eq g, Eq h, Eq i,
-    --            Eq j, Eq k, Eq l) =>
-    --           Eq (a, b, c, d, e, f, g, h, i, j, k, l)
+-- | Prints a context or @()@ if empty. This is used when, e.g., we want to
+-- display a context in an error message.
+pprIfaceContext :: [IfacePredType] -> SDoc
+pprIfaceContext []     = parens empty
+pprIfaceContext [pred] = ppr_ty TyOpPrec pred
+pprIfaceContext preds  = parens (fsep (punctuate comma (map ppr preds)))
 
 instance Binary IfaceType where
     put_ bh (IfaceForAllTy aa ab) = do

@@ -28,7 +28,7 @@ pprIfaceTyLit :: IfaceTyLit -> SDoc
 pprIfaceForAll :: [IfaceForAllBndr] -> SDoc
 pprIfaceTvBndr :: Bool -> IfaceTvBndr -> SDoc
 pprUserIfaceForAll :: [IfaceForAllBndr] -> SDoc
-pprIfaceContext :: Outputable a => [a] -> SDoc
+pprIfaceContext :: [IfacePredType] -> SDoc
 pprIfaceContextArr :: [IfacePredType] -> SDoc
 pprIfaceTypeApp :: TyPrec -> IfaceTyCon -> IfaceTcArgs -> SDoc
 pprIfaceCoTcApp :: TyPrec -> IfaceTyCon -> [IfaceCoercion] -> SDoc
