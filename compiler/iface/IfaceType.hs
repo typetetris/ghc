@@ -14,7 +14,7 @@ module IfaceType (
 
         IfaceType(..), IfacePredType, IfaceKind, IfaceCoercion(..),
         IfaceUnivCoProv(..),
-        IfaceTyCon(..), IfaceTyConInfo(..),
+        IfaceTyCon(..), IfaceTyConInfo(..), IsPromoted(..),
         IfaceTyLit(..), IfaceTcArgs(..),
         IfaceContext, IfaceBndr(..), IfaceOneShot(..), IfaceLamBndr,
         IfaceTvBndr, IfaceIdBndr, IfaceTyConBinder,
@@ -138,7 +138,8 @@ data IfaceType     -- A kind of universal type, used for types and kinds
   | IfaceCastTy     IfaceType IfaceCoercion
   | IfaceCoercionTy IfaceCoercion
   | IfaceTupleTy                  -- Saturated tuples (unsaturated ones use IfaceTyConApp)
-       TupleSort IfaceTyConInfo   -- A bit like IfaceTyCon
+       TupleSort                  -- What sort of tuple?
+       IsPromoted                 -- A bit like IfaceTyCon
        IfaceTcArgs                -- arity = length args
           -- For promoted data cons, the kind args are omitted
 
@@ -178,10 +179,14 @@ data IfaceTyCon = IfaceTyCon { ifaceTyConName :: IfExtName
                              , ifaceTyConInfo :: IfaceTyConInfo }
     deriving (Eq)
 
+-- | Is a TyCon a promoted data constructor or just a normal type constructor?
+data IsPromoted = IsNotPromoted | IsPromoted
+    deriving (Eq)
+
 data IfaceTyConInfo   -- Used to guide pretty-printing
                       -- and to disambiguate D from 'D (they share a name)
-  = NoIfaceTyConInfo
-  | IfacePromotedDataCon
+  = IfaceTyConInfo { ifaceTyConIsPromoted :: IsPromoted
+                   , ifaceTyConTupleSort  :: Maybe TupleSort }
     deriving (Eq)
 
 data IfaceCoercion
@@ -225,9 +230,10 @@ interface file.
 
 -- this constant is needed for dealing with pretty-printing classes
 ifConstraintKind :: IfaceKind
-ifConstraintKind = IfaceTyConApp (IfaceTyCon { ifaceTyConName = getName constraintKindTyCon
-                                             , ifaceTyConInfo = NoIfaceTyConInfo })
-                                 ITC_Nil
+ifConstraintKind = IfaceTyConApp tc ITC_Nil
+  where
+    tc = IfaceTyCon { ifaceTyConName = getName constraintKindTyCon
+                    , ifaceTyConInfo = IfaceTyConInfo IsNotPromoted Nothing }
 
 {-
 %************************************************************************
@@ -682,7 +688,7 @@ pprParendIfaceType = eliminateRuntimeRep (ppr_ty TyConPrec)
 ppr_ty :: TyPrec -> IfaceType -> SDoc
 ppr_ty _         (IfaceTyVar tyvar)     = ppr tyvar
 ppr_ty ctxt_prec (IfaceTyConApp tc tys) = pprTyTcApp ctxt_prec tc tys
-ppr_ty _         (IfaceTupleTy s i tys) = pprTuple s i tys
+ppr_ty _         (IfaceTupleTy i p tys) = pprTuple i p tys
 ppr_ty _         (IfaceLitTy n)         = pprIfaceTyLit n
         -- Function types
 ppr_ty ctxt_prec (IfaceFunTy ty1 ty2)
@@ -807,7 +813,7 @@ defaultRuntimeRepVars = go emptyFsEnv
     go _ other = other
 
     ptrRepLifted :: IfaceTyCon
-    ptrRepLifted = IfaceTyCon dc_name IfacePromotedDataCon
+    ptrRepLifted = IfaceTyCon dc_name (IfaceTyConInfo IsPromoted Nothing)
       where dc_name = getName $ promoteDataCon ptrRepLiftedDataCon
 
     isRuntimeRep :: IfaceType -> Bool
@@ -1062,13 +1068,11 @@ ppr_iface_tc_app pp ctxt_prec tc tys
   where
     tc_name = ifaceTyConName tc
 
-pprTuple :: TupleSort -> IfaceTyConInfo -> IfaceTcArgs -> SDoc
-pprTuple sort info args
-  | ConstraintTuple <- sort
-  , ITC_Nil <- args
+pprTuple :: TupleSort -> IsPromoted -> IfaceTcArgs -> SDoc
+pprTuple ConstraintTuple IsNotPromoted ITC_Nil
   = text "() :: Constraint"
 
-  | otherwise
+pprTuple sort promoted args
   =   -- drop the RuntimeRep vars.
       -- See Note [Unboxed tuple RuntimeRep vars] in TyCon
     let tys   = tcArgsIfaceTypes args
@@ -1076,7 +1080,7 @@ pprTuple sort info args
                   UnboxedTuple -> drop (length tys `div` 2) tys
                   _            -> tys
     in
-    pprPromotionQuoteI info <>
+    pprPromotionQuoteI promoted <>
     tupleParens sort (pprWithCommas pprIfaceType args')
 
 pprIfaceTyLit :: IfaceTyLit -> SDoc
@@ -1171,11 +1175,12 @@ instance Outputable IfaceTyCon where
   ppr tc = pprPromotionQuote tc <> ppr (ifaceTyConName tc)
 
 pprPromotionQuote :: IfaceTyCon -> SDoc
-pprPromotionQuote tc = pprPromotionQuoteI (ifaceTyConInfo tc)
+pprPromotionQuote tc =
+    pprPromotionQuoteI $ ifaceTyConIsPromoted $ ifaceTyConInfo tc
 
-pprPromotionQuoteI  :: IfaceTyConInfo -> SDoc
-pprPromotionQuoteI NoIfaceTyConInfo     = empty
-pprPromotionQuoteI IfacePromotedDataCon = char '\''
+pprPromotionQuoteI  :: IsPromoted -> SDoc
+pprPromotionQuoteI IsNotPromoted = empty
+pprPromotionQuoteI IsPromoted    = char '\''
 
 instance Outputable IfaceCoercion where
   ppr = pprIfaceCoercion
@@ -1187,15 +1192,21 @@ instance Binary IfaceTyCon where
                i <- get bh
                return (IfaceTyCon n i)
 
-instance Binary IfaceTyConInfo where
-   put_ bh NoIfaceTyConInfo     = putByte bh 0
-   put_ bh IfacePromotedDataCon = putByte bh 1
+instance Binary IsPromoted where
+   put_ bh IsNotPromoted = putByte bh 0
+   put_ bh IsPromoted    = putByte bh 1
 
-   get bh =
-     do i <- getByte bh
-        case i of
-          0 -> return NoIfaceTyConInfo
-          _ -> return IfacePromotedDataCon
+   get bh = do
+       n <- getByte bh
+       case n of
+         0 -> return IsNotPromoted
+         1 -> return IsPromoted
+         _ -> fail "Binary(IsPromoted): fail)"
+
+instance Binary IfaceTyConInfo where
+   put_ bh (IfaceTyConInfo i s) = put_ bh i >> put_ bh s
+
+   get bh = IfaceTyConInfo <$> get bh <*> get bh
 
 instance Outputable IfaceTyLit where
   ppr = pprIfaceTyLit
@@ -1551,12 +1562,12 @@ toIfaceType (CoercionTy co)     = IfaceCoercionTy (toIfaceCoercion co)
 toIfaceType (TyConApp tc tys)  -- Look for the two sorts of saturated tuple
   | Just sort <- tyConTuple_maybe tc
   , n_tys == arity
-  = IfaceTupleTy sort NoIfaceTyConInfo (toIfaceTcArgs tc tys)
+  = IfaceTupleTy sort IsNotPromoted (toIfaceTcArgs tc tys)
 
   | Just dc <- isPromotedDataCon_maybe tc
   , isTupleDataCon dc
   , n_tys == 2*arity
-  = IfaceTupleTy BoxedTuple IfacePromotedDataCon (toIfaceTcArgs tc (drop arity tys))
+  = IfaceTupleTy BoxedTuple IsPromoted (toIfaceTcArgs tc (drop arity tys))
 
   | otherwise
   = IfaceTyConApp (toIfaceTyCon tc) (toIfaceTcArgs tc tys)
@@ -1579,11 +1590,14 @@ toIfaceTyCon tc
   = IfaceTyCon tc_name info
   where
     tc_name = tyConName tc
-    info | isPromotedDataCon tc = IfacePromotedDataCon
-         | otherwise            = NoIfaceTyConInfo
+    info = IfaceTyConInfo promoted tuple_sort
+    promoted | isPromotedDataCon tc = IsPromoted
+             | otherwise            = IsNotPromoted
+    tuple_sort = tyConTuple_maybe tc
 
 toIfaceTyCon_name :: Name -> IfaceTyCon
-toIfaceTyCon_name n = IfaceTyCon n NoIfaceTyConInfo
+toIfaceTyCon_name n = IfaceTyCon n info
+  where info = IfaceTyConInfo IsNotPromoted Nothing
   -- Used for the "rough-match" tycon stuff,
   -- where pretty-printing is not an issue
 
