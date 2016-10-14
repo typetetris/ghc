@@ -962,6 +962,9 @@ pprTyTcApp' ctxt_prec tc tys dflags
   = maybeParen ctxt_prec FunPrec
     $ char '?' <> ftext n <> text "::" <> ppr_ty TopPrec ty
 
+  | Just sort <- ifaceTyConTupleSort info
+  = pprTuple sort (ifaceTyConIsPromoted info) tys
+
   | ifaceTyConName tc == consDataConName
   , not (gopt Opt_PrintExplicitKinds dflags)
   , ITC_Invis _ (ITC_Vis ty1 (ITC_Vis ty2 ITC_Nil)) <- tys
@@ -987,6 +990,7 @@ pprTyTcApp' ctxt_prec tc tys dflags
   | otherwise
   = ppr_iface_tc_app ppr_ty ctxt_prec tc tys_wo_kinds
   where
+    info = ifaceTyConInfo tc
     tys_wo_kinds = tcArgsIfaceTypes $ stripInvisArgs dflags tys
 
 -- | Pretty-print a type-level equality.
