@@ -183,10 +183,16 @@ data IfaceTyCon = IfaceTyCon { ifaceTyConName :: IfExtName
 data IsPromoted = IsNotPromoted | IsPromoted
     deriving (Eq)
 
+-- | The various types of TyCons which have special, built-in syntax.
+data IfaceTyConSort = IfaceNormalTyCon
+                    | IfaceTupleTyCon TupleSort
+                    | IfaceSumTyCon Arity
+                    deriving (Eq)
+
 data IfaceTyConInfo   -- Used to guide pretty-printing
                       -- and to disambiguate D from 'D (they share a name)
   = IfaceTyConInfo { ifaceTyConIsPromoted :: IsPromoted
-                   , ifaceTyConTupleSort  :: Maybe TupleSort }
+                   , ifaceTyConSort       :: IfaceTyConSort }
     deriving (Eq)
 
 data IfaceCoercion
@@ -233,7 +239,8 @@ ifConstraintKind :: IfaceKind
 ifConstraintKind = IfaceTyConApp tc ITC_Nil
   where
     tc = IfaceTyCon { ifaceTyConName = getName constraintKindTyCon
-                    , ifaceTyConInfo = IfaceTyConInfo IsNotPromoted Nothing }
+                    , ifaceTyConInfo = info }
+    info = IfaceTyConInfo IsNotPromoted IfaceNormalTyCon
 
 {-
 %************************************************************************
@@ -813,7 +820,8 @@ defaultRuntimeRepVars = go emptyFsEnv
     go _ other = other
 
     ptrRepLifted :: IfaceTyCon
-    ptrRepLifted = IfaceTyCon dc_name (IfaceTyConInfo IsPromoted Nothing)
+    ptrRepLifted =
+        IfaceTyCon dc_name (IfaceTyConInfo IsPromoted IfaceNormalTyCon)
       where dc_name = getName $ promoteDataCon ptrRepLiftedDataCon
 
     isRuntimeRep :: IfaceType -> Bool
@@ -962,7 +970,7 @@ pprTyTcApp' ctxt_prec tc tys dflags
   = maybeParen ctxt_prec FunPrec
     $ char '?' <> ftext n <> text "::" <> ppr_ty TopPrec ty
 
-  | Just sort <- ifaceTyConTupleSort info
+  | IfaceTupleTyCon sort <- ifaceTyConSort info
   = pprTuple sort (ifaceTyConIsPromoted info) tys
 
   | ifaceTyConName tc == consDataConName
@@ -1207,6 +1215,19 @@ instance Binary IsPromoted where
          0 -> return IsNotPromoted
          1 -> return IsPromoted
          _ -> fail "Binary(IsPromoted): fail)"
+
+instance Binary IfaceTyConSort where
+   put_ bh IfaceNormalTyCon       = putByte bh 0
+   put_ bh (IfaceTupleTyCon sort) = putByte bh 1 >> put_ bh sort
+   put_ bh (IfaceSumTyCon arity)  = putByte bh 2 >> put_ bh arity
+
+   get bh = do
+       n <- getByte bh
+       case n of
+         0 -> return IfaceNormalTyCon
+         1 -> IfaceTupleTyCon <$> get bh
+         2 -> IfaceSumTyCon <$> get bh
+         _ -> fail "Binary(IfaceTyConSort): fail"
 
 instance Binary IfaceTyConInfo where
    put_ bh (IfaceTyConInfo i s) = put_ bh i >> put_ bh s
@@ -1595,14 +1616,18 @@ toIfaceTyCon tc
   = IfaceTyCon tc_name info
   where
     tc_name = tyConName tc
-    info = IfaceTyConInfo promoted tuple_sort
+    info = IfaceTyConInfo promoted sort
     promoted | isPromotedDataCon tc = IsPromoted
              | otherwise            = IsNotPromoted
-    tuple_sort = tyConTuple_maybe tc
+    sort
+      | Just s <- tyConTuple_maybe tc        = IfaceTupleTyCon s
+      | Just cons <- isDataSumTyCon_maybe tc = IfaceSumTyCon (length cons)
+      | otherwise                            = IfaceNormalTyCon
+
 
 toIfaceTyCon_name :: Name -> IfaceTyCon
 toIfaceTyCon_name n = IfaceTyCon n info
-  where info = IfaceTyConInfo IsNotPromoted Nothing
+  where info = IfaceTyConInfo IsNotPromoted IfaceNormalTyCon
   -- Used for the "rough-match" tycon stuff,
   -- where pretty-printing is not an issue
 
