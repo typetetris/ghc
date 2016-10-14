@@ -83,6 +83,8 @@ import VarEnv
 import UniqFM
 import Util
 
+import Data.List (foldl')
+
 {-
 ************************************************************************
 *                                                                      *
@@ -162,6 +164,12 @@ data IfaceTcArgs
   | ITC_Invis IfaceKind IfaceTcArgs   -- "Invis" means don't show when pretty-printing
                                       --         except with -fprint-explicit-kinds
 
+instance Monoid IfaceTcArgs where
+  mempty = ITC_Nil
+  ITC_Nil `mappend` xs           = xs
+  ITC_Vis ty rest `mappend` xs   = ITC_Vis ty (rest `mappend` xs)
+  ITC_Invis ki rest `mappend` xs = ITC_Invis ki (rest `mappend` xs)
+
 -- Encodes type constructors, kind constructors,
 -- coercion constructors, the lot.
 -- We have to tag them in order to pretty print them
@@ -200,6 +208,20 @@ data IfaceUnivCoProv
   | IfacePhantomProv IfaceCoercion
   | IfaceProofIrrelProv IfaceCoercion
   | IfacePluginProv String
+  | IfaceHoleProv CoercionHole
+    -- ^ See Note [Holes in IfaceUnivCoProv]
+
+{-
+Note [Holes in IfaceUnivCoProv]
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+When typechecking fails the typechecker will produce a HoleProv UnivCoProv to
+stand in place of the unproven assertion. While we generally don't want to let
+these unproven assertions leak into interface files, we still need to be able to
+pretty-print them as we use IfaceType's pretty-printer to render Types. For this
+reason IfaceUnivCoProv has a IfaceHoleProv constructor; however, we fails when
+asked to serialize to a IfaceHoleProv to ensure that they don't end up in an
+interface file.
+-}
 
 -- this constant is needed for dealing with pretty-printing classes
 ifConstraintKind :: IfaceKind
@@ -330,6 +352,7 @@ ifTyVarsOfCoercion = go
     go_prov (IfacePhantomProv co)    = go co
     go_prov (IfaceProofIrrelProv co) = go co
     go_prov (IfacePluginProv _)      = emptyUniqSet
+    go_prov (IfaceHoleProv _)        = emptyUniqSet
 
 ifTyVarsOfCoercions :: [IfaceCoercion] -> UniqSet IfLclName
 ifTyVarsOfCoercions = foldr (unionUniqSets . ifTyVarsOfCoercion) emptyUniqSet
@@ -384,6 +407,7 @@ substIfaceType env ty
     go_prov (IfacePhantomProv co)    = IfacePhantomProv (go_co co)
     go_prov (IfaceProofIrrelProv co) = IfaceProofIrrelProv (go_co co)
     go_prov (IfacePluginProv str)    = IfacePluginProv str
+    go_prov (IfaceHoleProv h)        = IfaceHoleProv h
 
 substIfaceTcArgs :: IfaceTySubst -> IfaceTcArgs -> IfaceTcArgs
 substIfaceTcArgs env args
@@ -568,6 +592,17 @@ we want
 ************************************************************************
 -}
 
+if_print_coercions :: SDoc  -- ^ if printing coercions
+                   -> SDoc  -- ^ otherwise
+                   -> SDoc
+if_print_coercions yes no
+  = sdocWithDynFlags $ \dflags ->
+    getPprStyle $ \style ->
+    if gopt Opt_PrintExplicitCoercions dflags
+         || dumpStyle style || debugStyle style
+    then yes
+    else no
+
 pprIfaceInfixApp :: (TyPrec -> a -> SDoc) -> TyPrec -> SDoc -> a -> a -> SDoc
 pprIfaceInfixApp pp p pp_tc ty1 ty2
   = maybeParen p FunPrec $
@@ -661,15 +696,38 @@ ppr_ty ctxt_prec (IfaceFunTy ty1 ty2)
       = [arrow <+> pprIfaceType other_ty]
 
 ppr_ty ctxt_prec (IfaceAppTy ty1 ty2)
-  = maybeParen ctxt_prec TyConPrec $
-    ppr_ty FunPrec ty1 <+> pprParendIfaceType ty2
+  = if_print_coercions
+      ppr_app_ty
+      ppr_app_ty_no_casts
+  where
+    ppr_app_ty =
+        maybeParen ctxt_prec TyConPrec
+        $ ppr_ty FunPrec ty1 <+> ppr_ty TyConPrec ty2
+
+    -- Strip any casts from the head of the application
+    ppr_app_ty_no_casts =
+        case split_app_tys ty1 (ITC_Vis ty2 ITC_Nil) of
+          (IfaceCastTy head _, args) -> ppr_ty ctxt_prec (mk_app_tys head args)
+          _                          -> ppr_app_ty
+
+    split_app_tys :: IfaceType -> IfaceTcArgs -> (IfaceType, IfaceTcArgs)
+    split_app_tys (IfaceAppTy t1 t2) args = split_app_tys t1 (t2 `ITC_Vis` args)
+    split_app_tys head               args = (head, args)
+
+    mk_app_tys :: IfaceType -> IfaceTcArgs -> IfaceType
+    mk_app_tys (IfaceTyConApp tc tys1) tys2 = IfaceTyConApp tc (tys1 `mappend` tys2)
+    mk_app_tys t1                      tys2 = foldl' IfaceAppTy t1 (tcArgsIfaceTypes tys2)
 
 ppr_ty ctxt_prec (IfaceCastTy ty co)
   = maybeParen ctxt_prec FunPrec $
-    sep [ppr_ty FunPrec ty, text "`cast`", ppr_co FunPrec co]
+    if_print_coercions
+      (parens (ppr_ty TopPrec ty <+> text "|>" <+> ppr co))
+      (ppr_ty ctxt_prec ty)
 
 ppr_ty ctxt_prec (IfaceCoercionTy co)
-  = ppr_co ctxt_prec co
+  = if_print_coercions
+      (ppr_co ctxt_prec co)
+      (text "<>")
 
 ppr_ty ctxt_prec ty
   = maybeParen ctxt_prec FunPrec (ppr_iface_sigma_type True ty)
@@ -1061,6 +1119,13 @@ ppr_co ctxt_prec (IfaceUnivCo IfaceUnsafeCoerceProv r ty1 ty2)
     text "UnsafeCo" <+> ppr r <+>
     pprParendIfaceType ty1 <+> pprParendIfaceType ty2
 
+ppr_co ctxt_prec (IfaceUnivCo (IfaceHoleProv h) _ _ _)
+ = maybeParen ctxt_prec TyConPrec $
+   sdocWithDynFlags $ \dflags ->
+     if gopt Opt_PrintExplicitCoercions dflags
+       then ppr h
+       else braces $ text "a hole"
+
 ppr_co _         (IfaceUnivCo _ _ ty1 ty2)
   = angleBrackets ( ppr ty1 <> comma <+> ppr ty2 )
 
@@ -1417,6 +1482,8 @@ instance Binary IfaceUnivCoProv where
   put_ bh (IfacePluginProv a) = do
           putByte bh 4
           put_ bh a
+  put_ _  (IfaceHoleProv _) = pprPanic "Binary(IfaceUnivCoProv) hit a hole" empty
+  -- See Note [Holes in IfaceUnivCoProv]
 
   get bh = do
       tag <- getByte bh
@@ -1571,4 +1638,4 @@ toIfaceUnivCoProv UnsafeCoerceProv    = IfaceUnsafeCoerceProv
 toIfaceUnivCoProv (PhantomProv co)    = IfacePhantomProv (toIfaceCoercion co)
 toIfaceUnivCoProv (ProofIrrelProv co) = IfaceProofIrrelProv (toIfaceCoercion co)
 toIfaceUnivCoProv (PluginProv str)    = IfacePluginProv str
-toIfaceUnivCoProv (HoleProv h) = pprPanic "toIfaceUnivCoProv hit a hole" (ppr h)
+toIfaceUnivCoProv (HoleProv h)        = IfaceHoleProv h
