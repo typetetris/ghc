@@ -2491,7 +2491,7 @@ pprTyVars :: [TyVar] -> SDoc
 pprTyVars tvs = sep (map pprTyVar tvs)
 
 pprTyVar :: TyVar -> SDoc
-pprTyVar = pprIfaceTvBndr False . toIfaceTvBndr
+pprTyVar = pprIfaceTvBndr True . toIfaceTvBndr
 
 instance Outputable TyBinder where
   ppr (Anon ty) = text "[anon]" <+> ppr ty
