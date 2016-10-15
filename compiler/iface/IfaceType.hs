@@ -732,8 +732,7 @@ ppr_ty ctxt_prec (IfaceAppTy ty1 ty2)
     mk_app_tys t1                      tys2 = foldl' IfaceAppTy t1 (tcArgsIfaceTypes tys2)
 
 ppr_ty ctxt_prec (IfaceCastTy ty co)
-  = maybeParen ctxt_prec FunPrec $
-    if_print_coercions
+  = if_print_coercions
       (parens (ppr_ty TopPrec ty <+> text "|>" <+> ppr co))
       (ppr_ty ctxt_prec ty)
 
