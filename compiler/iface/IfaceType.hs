@@ -1019,7 +1019,6 @@ ppr_equality tc args
   where
     tc_name = ifaceTyConName tc
     pp = ppr_ty
-    pp_tc = ppr tc
     hom_eq_tc = tc_name `hasKey` eqTyConKey            -- (~)
     hetero_eq_tc = tc_name `hasKey` eqPrimTyConKey     -- (~#)
                 || tc_name `hasKey` eqReprPrimTyConKey -- (~R#)
@@ -1032,13 +1031,13 @@ ppr_equality tc args
 
     print_equality' (ki1, ki2, ty1, ty2) style dflags
       | print_eqs
-      = ppr_infix_eq pp_tc
+      = ppr_infix_eq (ppr tc)
 
       | hetero_eq_tc
       , print_kinds || not (eqIfaceType emptyIfRnEnv2 ki1 ki2)
       = ppr_infix_eq $ if tc_name `hasKey` eqPrimTyConKey
                        then text "~~"
-                       else pp_tc
+                       else ppr tc
 
       | otherwise
       = if tc_name `hasKey` eqReprPrimTyConKey
