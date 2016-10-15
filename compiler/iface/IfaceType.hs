@@ -973,6 +973,9 @@ pprTyTcApp' ctxt_prec tc tys dflags
   | IfaceTupleTyCon sort <- ifaceTyConSort info
   = pprTuple sort (ifaceTyConIsPromoted info) tys
 
+  | IfaceSumTyCon arity <- ifaceTyConSort info
+  = pprSum arity (ifaceTyConIsPromoted info) tys
+
   | ifaceTyConName tc == consDataConName
   , not (gopt Opt_PrintExplicitKinds dflags)
   , ITC_Invis _ (ITC_Vis ty1 (ITC_Vis ty2 ITC_Nil)) <- tys
@@ -1080,6 +1083,15 @@ ppr_iface_tc_app pp ctxt_prec tc tys
   = pprIfacePrefixApp ctxt_prec (parens (ppr tc)) (map (pp TyConPrec) tys)
   where
     tc_name = ifaceTyConName tc
+
+pprSum :: Arity -> IsPromoted -> IfaceTcArgs -> SDoc
+pprSum _arity is_promoted args
+  =   -- drop the RuntimeRep vars.
+      -- See Note [Unboxed tuple RuntimeRep vars] in TyCon
+    let tys   = tcArgsIfaceTypes args
+        args' = drop (length tys `div` 2) tys
+    in pprPromotionQuoteI is_promoted
+       <> sumParens (pprWithBars (ppr_ty TopPrec) args')
 
 pprTuple :: TupleSort -> IsPromoted -> IfaceTcArgs -> SDoc
 pprTuple ConstraintTuple IsNotPromoted ITC_Nil
@@ -1621,7 +1633,8 @@ toIfaceTyCon tc
              | otherwise            = IsNotPromoted
     sort
       | Just s <- tyConTuple_maybe tc        = IfaceTupleTyCon s
-      | Just cons <- isDataSumTyCon_maybe tc = IfaceSumTyCon (length cons)
+      | isUnboxedSumTyCon tc
+      , Just cons <- isDataSumTyCon_maybe tc = pprTrace "toIfaceTyCon" (ppr tc) $ IfaceSumTyCon (length cons)
       | otherwise                            = IfaceNormalTyCon
 
 
