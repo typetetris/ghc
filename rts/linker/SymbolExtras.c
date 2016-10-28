@@ -102,6 +102,7 @@ int ocAllocateSymbolExtras( ObjectCode* oc, int count, int first )
 }
 
 
+#ifndef arm_HOST_ARCH
 SymbolExtra* makeSymbolExtra( ObjectCode* oc,
                               unsigned long symbolNumber,
                               unsigned long target )
@@ -137,6 +138,7 @@ SymbolExtra* makeSymbolExtra( ObjectCode* oc,
 
     return extra;
 }
+#endif
 
 #ifdef arm_HOST_ARCH
 /*
