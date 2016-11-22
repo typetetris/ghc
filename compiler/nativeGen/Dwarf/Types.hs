@@ -426,8 +426,7 @@ pprSetUnwind :: Platform
                 -- ^ the old and new values of the register
              -> SDoc
 pprSetUnwind plat g  (_, Nothing)
-  = pprByte dW_CFA_undefined $$
-    pprLEBRegNo plat g
+  = pprUndefUnwind plat g
 pprSetUnwind _    Sp (Just (UwReg s _), Just (UwReg s' o')) | s == s'
   = if o' >= 0
     then pprByte dW_CFA_def_cfa_offset $$ pprLEBWord (fromIntegral o')
@@ -497,7 +496,7 @@ pprUnwindExpr spIsCFA expr
 pprUndefUnwind :: Platform -> GlobalReg -> SDoc
 pprUndefUnwind _    Sp = panic "pprUndefUnwind Sp" -- should never happen
 pprUndefUnwind plat g  = pprByte dW_CFA_undefined $$
-                         pprLEBWord (fromIntegral $ dwarfGlobalRegNo plat g)
+                         pprLEBRegNo plat g
 
 
 -- | Align assembly at (machine) word boundary
