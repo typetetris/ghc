@@ -323,7 +323,7 @@ StgRunIsImplementedInAssembler(void)
 #if defined(mingw32_HOST_OS)
           "i"(80 /*stack frame size; 8 too large to make the alignment right*/)
 #else
-          "i"(48 /*stack frame size*/)
+          "i"(STG_RUN_STACK_FRAME_SIZE /*stack frame size*/)
 #endif
         );
         /*
