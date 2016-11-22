@@ -217,10 +217,8 @@ debugFrame u procs
                , dwCieProcs = map (procToFrame initUws) procs
                }
   where
-    -- This is the initial set of unwind records. Note it would not be sufficient to simply
-    -- place these records in the CIE's initial unwind instructions. Why? Well, TODO
     initUws :: UnwindTable
-    initUws = Map.fromList [(Sp, Just (UwReg Sp 0)), (MachSp, Just (UwReg MachSp 0))]
+    initUws = Map.fromList [(Sp, Just (UwReg Sp 0))]
 
 -- | Generates unwind information for a procedure debug block
 procToFrame :: UnwindTable -> DebugBlock -> DwarfFrameProc
