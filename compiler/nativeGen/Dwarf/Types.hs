@@ -368,16 +368,21 @@ pprFrameBlock (DwarfFrameBlock hasInfo uws0) =
   where
     pprFrameDecl :: Bool -> UnwindPoint -> S.State UnwindTable SDoc
     pprFrameDecl firstDecl (UnwindPoint lbl uws) = S.state $ \oldUws ->
-        let isChanged :: GlobalReg -> Maybe UnwindExpr
+        let -- Did a register's unwind expression change?
+            isChanged :: GlobalReg -> Maybe UnwindExpr
                       -> Maybe (Maybe UnwindExpr, Maybe UnwindExpr)
             isChanged g new
+                -- the value didn't change
               | Just new == old = Nothing
+                -- the value was and still is undefined
+              | Nothing <- old
+              , Nothing <- new  = Nothing
+                -- the value changed
               | otherwise       = Just (join old, new)
               where
                 old = Map.lookup g oldUws
 
             changed = Map.toList $ Map.mapMaybeWithKey isChanged uws
-            died    = Map.toList $ Map.difference oldUws uws
 
         in if oldUws == uws
              then (empty, oldUws)
@@ -385,8 +390,7 @@ pprFrameBlock (DwarfFrameBlock hasInfo uws0) =
                       lblDoc = ppr lbl <> if needsOffset then text "-1" else empty
                       doc = sdocWithPlatform $ \plat ->
                            pprByte dW_CFA_set_loc $$ pprWord lblDoc $$
-                           vcat (map (uncurry $ pprSetUnwind' plat) changed) $$
-                           vcat (map (pprUndefUnwind plat . fst) died)
+                           vcat (map (uncurry $ pprSetUnwind' plat) changed)
                       pprSetUnwind' plat b c =
                           ifPprDebug (text "# "<+>ppr changed) $$ pprSetUnwind plat b c
                   in (doc, uws)
