@@ -264,6 +264,8 @@ data DwarfFrameProc
     , dwFdeBlocks  :: [DwarfFrameBlock]
       -- ^ List of blocks. Order must match asm!
     }
+instance Outputable DwarfFrameProc where
+    ppr x = ppr (dwFdeProc x) <> colon <+> hsep (map ppr $ dwFdeBlocks x)
 
 -- | Unwind instructions for a block. Will become part of the
 -- containing FDE.
@@ -379,12 +381,14 @@ pprFrameBlock (DwarfFrameBlock hasInfo uws0) =
 
         in if oldUws == uws
              then (empty, oldUws)
-             else let needsOffset = firstDecl && hasInfo -- see [Note: Info Offset]
+             else let needsOffset = firstDecl && hasInfo -- see Note [Info Offset]
                       lblDoc = ppr lbl <> if needsOffset then text "-1" else empty
                       doc = sdocWithPlatform $ \plat ->
                            pprByte dW_CFA_set_loc $$ pprWord lblDoc $$
-                           vcat (map (uncurry $ pprSetUnwind plat) changed) $$
+                           vcat (map (uncurry $ pprSetUnwind' plat) changed) $$
                            vcat (map (pprUndefUnwind plat . fst) died)
+                      pprSetUnwind' plat b c =
+                          ifPprDebug (text "# "<+>ppr changed) $$ pprSetUnwind plat b c
                   in (doc, uws)
 
 -- Note [Info Offset]
