@@ -582,6 +582,10 @@ tcRnHsBootDecls hsc_src decls
              <- tcTyClsInstDecls tycl_decls deriv_decls val_binds
         ; setGblEnv tcg_env     $ do {
 
+        -- Emit Typeable bindings
+        ; tcg_env <- mkTypeableBinds
+        ; setGblEnv tcg_env $ do {
+
                 -- Typecheck value declarations
         ; traceTc "Tc5" empty
         ; val_ids <- tcHsBootSigs val_binds val_sigs
@@ -601,7 +605,7 @@ tcRnHsBootDecls hsc_src decls
               }
 
         ; setGlobalTypeEnv gbl_env type_env2
-   }}
+   }}}
    ; traceTc "boot" (ppr lie); return gbl_env }
 
 badBootDecl :: HscSource -> String -> Located decl -> TcM ()

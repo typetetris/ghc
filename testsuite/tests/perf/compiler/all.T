@@ -155,7 +155,7 @@ test('T3294',
              # 2015-07-11 43196344 (x86/Linux, 64-bit machine) use +RTS -G1
              # 2016-04-06 28686588 (x86/Linux, 64-bit machine)
 
-           (wordsize(64), 52992688, 20)]),
+           (wordsize(64), 98613592, 20)]),
              # prev:           25753192 (amd64/Linux)
              # 29/08/2012:     37724352 (amd64/Linux)
              #  (increase due to new codegen, see #7198)
@@ -173,6 +173,7 @@ test('T3294',
              #  D757: emit Typeable instances at site of type definition
              # 2016-07-11:     54609256  (Windows) before fix for #12227
              # 2016-07-11:     52992688  (Windows) after fix for #12227
+             # 2017-02-10:     98613592  (amd64/Linux) Type indexed Typeable
 
       compiler_stats_num_field('bytes allocated',
           [(wordsize(32), 1377050640, 5),
@@ -182,7 +183,7 @@ test('T3294',
            # 2013-11-13: 1478325844  (x86/Windows, 64bit machine)
            # 2014-01-12: 1565185140  (x86/Linux)
            # 2013-04-04: 1377050640  (x86/Windows, 64bit machine)
-           (wordsize(64), 2739731144, 5)]),
+           (wordsize(64), 3508181704, 5)]),
             # old:        1357587088 (amd64/Linux)
             # 29/08/2012: 2961778696 (amd64/Linux)
             # (^ increase due to new codegen, see #7198)
@@ -195,6 +196,7 @@ test('T3294',
             # 2014-09-10: 2709595808 (amd64/Linux) post-AMP cleanup
             # 2016-07-11: 2664479936 (Windows) before fix for #12227
             # 2016-07-11: 2739731144 (Windows) after fix for #12227 (ignoring)
+            # 2016-02-10: 3508181704 (amd64/Linux) (Type indexed Typeable)
       conf_3294,
 
       # Use `+RTS -G1` for more stable residency measurements. Note [residency].
@@ -737,14 +739,14 @@ test('T9675',
 test('T9872a',
      [ only_ways(['normal']),
        compiler_stats_num_field('bytes allocated',
-          [(wordsize(64), 7346861128, 5),
+          [(wordsize(64), 3298422648, 5),
           # 2014-12-10    5521332656    Initally created
           # 2014-12-16    5848657456    Flattener parameterized over roles
           # 2014-12-18    2680733672    Reduce type families even more eagerly
           # 2015-12-11    3581500440    TypeInType (see #11196)
           # 2016-04-07    3352882080    CSE improvements
           # 2016-10-19    3134866040    Refactor traceRn interface (#12617)
-          # 2017-02-01    7346861128
+          # 2017-02-01    3298422648    Type-indexed Typeable
            (wordsize(32), 1740903516, 5)
           # was           1325592896
           # 2016-04-06    1740903516    x86/Linux
