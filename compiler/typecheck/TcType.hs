@@ -62,7 +62,8 @@ module TcType (
   tcSplitPhiTy, tcSplitPredFunTy_maybe,
   tcSplitFunTy_maybe, tcSplitFunTys, tcFunArgTy, tcFunResultTy, tcFunResultTyN,
   tcSplitFunTysN,
-  tcSplitTyConApp, tcSplitTyConApp_maybe, tcRepSplitTyConApp_maybe,
+  tcSplitTyConApp, tcSplitTyConApp_maybe,
+  tcRepSplitTyConApp_maybe, tcRepSplitTyConApp_maybe',
   tcTyConAppTyCon, tcTyConAppTyCon_maybe, tcTyConAppArgs,
   tcSplitAppTy_maybe, tcSplitAppTy, tcSplitAppTys, tcRepSplitAppTy_maybe,
   tcGetTyVar_maybe, tcGetTyVar, nextRole,
@@ -1458,6 +1459,7 @@ tcSplitTyConApp_maybe :: HasCallStack => Type -> Maybe (TyCon, [Type])
 tcSplitTyConApp_maybe ty | Just ty' <- coreView ty = tcSplitTyConApp_maybe ty'
 tcSplitTyConApp_maybe ty                           = tcRepSplitTyConApp_maybe ty
 
+-- | Like 'tcSplitTyConApp_maybe' but doesn't look through type synonyms.
 tcRepSplitTyConApp_maybe :: HasCallStack => Type -> Maybe (TyCon, [Type])
 tcRepSplitTyConApp_maybe (TyConApp tc tys)          = Just (tc, tys)
 tcRepSplitTyConApp_maybe (FunTy arg res)
@@ -1468,6 +1470,26 @@ tcRepSplitTyConApp_maybe (FunTy arg res)
   | otherwise
   = pprPanic "tcRepSplitTyConApp_maybe" (ppr arg $$ ppr res)
 tcRepSplitTyConApp_maybe _                          = Nothing
+
+-- | Like 'tcRepSplitTyConApp_maybe', but returns 'Nothing' if,
+--
+-- 1. the type is structurally not a type constructor application, or
+--
+-- 2. the type is a function type (e.g. application of 'funTyCon'), but we
+--    currently don't even enough information to fully determine its RuntimeRep
+--    variables. For instance, @FunTy (a :: k) Int@.
+--
+-- By constrast 'tcRepSplitTyConApp_maybe' panics in the second case.
+--
+-- The behavior here is needed during canonicalization; see Note [FunTy and
+-- decomposing tycon applications] in TcCanonical for details.
+tcRepSplitTyConApp_maybe' :: HasCallStack => Type -> Maybe (TyCon, [Type])
+tcRepSplitTyConApp_maybe' (TyConApp tc tys)          = Just (tc, tys)
+tcRepSplitTyConApp_maybe' (FunTy arg res)
+  | Just arg_rep <- getRuntimeRep_maybe arg
+  , Just res_rep <- getRuntimeRep_maybe res
+  = Just (funTyCon, [arg_rep, res_rep, arg, res])
+tcRepSplitTyConApp_maybe' _                          = Nothing
 
 
 -----------------------

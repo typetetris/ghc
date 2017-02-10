@@ -541,6 +541,25 @@ track whether or not we've already flattened.
 
 It is conceivable to do a better job at tracking whether or not a type
 is flattened, but this is left as future work. (Mar '15)
+
+
+Note [FunTy and decomposing tycon applications]
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+When can_eq_nc' attempts to decompose a tycon application we haven't yet zonked.
+This means that we may very well have a FunTy containing a type of some unknown
+kind. For instance, we may have,
+
+    FunTy (a :: k) Int
+
+Where k is a unification variable. tcRepSplitTyConApp_maybe panics in the event
+that it sees such a type as it cannot determine the RuntimeReps which the (->)
+is applied to. Consequently, it is vital that we instead use
+tcRepSplitTyConApp_maybe', which simply returns Nothing in such a case.
+
+When this happens can_eq_nc' will fail to decompose, zonk, and try again.
+Zonking should fill the variable k, meaning that decomposition will succeed the
+second time around.
 -}
 
 canEqNC :: CtEvidence -> EqRel -> Type -> Type -> TcS (StopOrContinue Ct)
@@ -614,8 +633,9 @@ can_eq_nc' _flat _rdr_env _envs ev eq_rel ty1@(LitTy l1) _ (LitTy l2) _
 -- Try to decompose type constructor applications
 -- Including FunTy (s -> t)
 can_eq_nc' _flat _rdr_env _envs ev eq_rel ty1 _ ty2 _
-  | Just (tc1, tys1) <- tcRepSplitTyConApp_maybe ty1
-  , Just (tc2, tys2) <- tcRepSplitTyConApp_maybe ty2
+    --- See Note [FunTy and decomposing type constructor applications].
+  | Just (tc1, tys1) <- tcRepSplitTyConApp_maybe' ty1
+  , Just (tc2, tys2) <- tcRepSplitTyConApp_maybe' ty2
   , not (isTypeFamilyTyCon tc1)
   , not (isTypeFamilyTyCon tc2)
   = canTyConApp ev eq_rel tc1 tys1 tc2 tys2
