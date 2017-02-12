@@ -18,9 +18,11 @@ Roles2.$tcT2
       Roles2.$trModule
       (GHC.Types.TrNameS "T2"#)
       0
-      (GHC.Types.KindRepFun
-         (GHC.Types.KindRepTYPE GHC.Types.LiftedRep)
-         (GHC.Types.KindRepTYPE GHC.Types.LiftedRep))
+      krep
+krep [InlPrag=[~]]
+  = GHC.Types.KindRepFun
+      (GHC.Types.KindRepTYPE GHC.Types.LiftedRep)
+      (GHC.Types.KindRepTYPE GHC.Types.LiftedRep)
 Roles2.$tc'K2
   = GHC.Types.TyCon
       17395957229042313563##
@@ -28,11 +30,13 @@ Roles2.$tc'K2
       Roles2.$trModule
       (GHC.Types.TrNameS "'K2"#)
       1
-      (GHC.Types.KindRepFun
-         (GHC.Types.KindRepTyConApp
-            GHC.Ptr.$tcFunPtr ((:) (GHC.Types.KindRepVar 0) []))
-         (GHC.Types.KindRepTyConApp
-            Roles2.$tcT2 ((:) (GHC.Types.KindRepVar 0) [])))
+      krep
+krep [InlPrag=[~]]
+  = GHC.Types.KindRepFun
+      (GHC.Types.KindRepTyConApp
+         GHC.Ptr.$tcFunPtr ((:) (GHC.Types.KindRepVar 0) []))
+      (GHC.Types.KindRepTyConApp
+         Roles2.$tcT2 ((:) (GHC.Types.KindRepVar 0) []))
 Roles2.$tcT1
   = GHC.Types.TyCon
       10310640733256438505##
@@ -40,9 +44,11 @@ Roles2.$tcT1
       Roles2.$trModule
       (GHC.Types.TrNameS "T1"#)
       0
-      (GHC.Types.KindRepFun
-         (GHC.Types.KindRepTYPE GHC.Types.LiftedRep)
-         (GHC.Types.KindRepTYPE GHC.Types.LiftedRep))
+      krep
+krep [InlPrag=[~]]
+  = GHC.Types.KindRepFun
+      (GHC.Types.KindRepTYPE GHC.Types.LiftedRep)
+      (GHC.Types.KindRepTYPE GHC.Types.LiftedRep)
 Roles2.$tc'K1
   = GHC.Types.TyCon
       16530009231990968394##
@@ -50,11 +56,13 @@ Roles2.$tc'K1
       Roles2.$trModule
       (GHC.Types.TrNameS "'K1"#)
       1
-      (GHC.Types.KindRepFun
-         (GHC.Types.KindRepTyConApp
-            GHC.Types.$tcIO ((:) (GHC.Types.KindRepVar 0) []))
-         (GHC.Types.KindRepTyConApp
-            Roles2.$tcT1 ((:) (GHC.Types.KindRepVar 0) [])))
+      krep
+krep [InlPrag=[~]]
+  = GHC.Types.KindRepFun
+      (GHC.Types.KindRepTyConApp
+         GHC.Types.$tcIO ((:) (GHC.Types.KindRepVar 0) []))
+      (GHC.Types.KindRepTyConApp
+         Roles2.$tcT1 ((:) (GHC.Types.KindRepVar 0) []))
 Roles2.$trModule
   = GHC.Types.Module
       (GHC.Types.TrNameS "main"#) (GHC.Types.TrNameS "Roles2"#)

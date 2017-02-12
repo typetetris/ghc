@@ -1,6 +1,6 @@
 
 Typeable1.hs:22:5: error:
-    • Couldn't match kind ‘k4 -> (* -> *) -> (* -> *) -> * -> *’
+    • Couldn't match kind ‘* -> (* -> *) -> (* -> *) -> * -> *’
                      with ‘forall k. (* -> *) -> (k -> *) -> k -> *’
       Inaccessible code in
         a pattern with pattern synonym:

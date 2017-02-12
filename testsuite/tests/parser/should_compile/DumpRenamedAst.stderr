@@ -9,14 +9,14 @@
     [
      ({ DumpRenamedAst.hs:11:1-23 }
       (FunBind 
-       ({ DumpRenamedAst.hs:11:1-4 }{Name: main:DumpRenamedAst.main{v rt3}}) 
+       ({ DumpRenamedAst.hs:11:1-4 }{Name: main:DumpRenamedAst.main{v rqO}}) 
        (MG 
         ({ DumpRenamedAst.hs:11:1-23 }
          [
           ({ DumpRenamedAst.hs:11:1-23 }
            (Match 
             (FunRhs 
-             ({ DumpRenamedAst.hs:11:1-4 }{Name: main:DumpRenamedAst.main{v rt3}}) 
+             ({ DumpRenamedAst.hs:11:1-4 }{Name: main:DumpRenamedAst.main{v rqO}}) 
              (Prefix)) 
             [] 
             (Nothing) 
@@ -49,7 +49,7 @@
    [
     ({ DumpRenamedAst.hs:5:1-30 }
      (DataDecl 
-      ({ DumpRenamedAst.hs:5:6-10 }{Name: main:DumpRenamedAst.Peano{tc rt0}}) 
+      ({ DumpRenamedAst.hs:5:6-10 }{Name: main:DumpRenamedAst.Peano{tc rqL}}) 
       (HsQTvs 
        [] 
        [] {NameSet: 
@@ -64,7 +64,7 @@
        [
         ({ DumpRenamedAst.hs:5:14-17 }
          (ConDeclH98 
-          ({ DumpRenamedAst.hs:5:14-17 }{Name: main:DumpRenamedAst.Zero{d rt1}}) 
+          ({ DumpRenamedAst.hs:5:14-17 }{Name: main:DumpRenamedAst.Zero{d rqM}}) 
           (Nothing) 
           (Just 
            ({ <no location info> }
@@ -74,7 +74,7 @@
           (Nothing))),
         ({ DumpRenamedAst.hs:5:21-30 }
          (ConDeclH98 
-          ({ DumpRenamedAst.hs:5:21-24 }{Name: main:DumpRenamedAst.Succ{d rt2}}) 
+          ({ DumpRenamedAst.hs:5:21-24 }{Name: main:DumpRenamedAst.Succ{d rqN}}) 
           (Nothing) 
           (Just 
            ({ <no location info> }
@@ -84,12 +84,12 @@
             ({ DumpRenamedAst.hs:5:26-30 }
              (HsTyVar 
               (NotPromoted) 
-              ({ DumpRenamedAst.hs:5:26-30 }{Name: main:DumpRenamedAst.Peano{tc rt0}})))]) 
+              ({ DumpRenamedAst.hs:5:26-30 }{Name: main:DumpRenamedAst.Peano{tc rqL}})))]) 
           (Nothing)))] 
        ({ <no location info> }
         [])) 
       (True) {NameSet: 
-      [{Name: main:DumpRenamedAst.Peano{tc rt0}}]}))] 
+      [{Name: main:DumpRenamedAst.Peano{tc rqL}}]}))] 
    [] 
    []),
   (TyClGroup 
@@ -102,9 +102,9 @@
          [
           ({ DumpRenamedAst.hs:8:3-36 }
            (TyFamEqn 
-            ({ DumpRenamedAst.hs:8:3-8 }{Name: main:DumpRenamedAst.Length{tc rr6}}) 
+            ({ DumpRenamedAst.hs:8:3-8 }{Name: main:DumpRenamedAst.Length{tc roR}}) 
             (HsIB 
-             [{Name: a{tv at7}},{Name: as{tv at8}}] 
+             [{Name: a{tv aqS}},{Name: as{tv aqT}}] 
              [
               ({ DumpRenamedAst.hs:8:10-17 }
                (HsParTy 
@@ -113,19 +113,19 @@
                   ({ DumpRenamedAst.hs:8:11 }
                    (HsTyVar 
                     (NotPromoted) 
-                    ({ DumpRenamedAst.hs:8:11 }{Name: a{tv at7}}))) 
+                    ({ DumpRenamedAst.hs:8:11 }{Name: a{tv aqS}}))) 
                   ({ DumpRenamedAst.hs:8:13 }{Name: ghc-prim:GHC.Types.:{(w) d 66}}) 
                   ({ DumpRenamedAst.hs:8:15-16 }
                    (HsTyVar 
                     (NotPromoted) 
-                    ({ DumpRenamedAst.hs:8:15-16 }{Name: as{tv at8}})))))))]) 
+                    ({ DumpRenamedAst.hs:8:15-16 }{Name: as{tv aqT}})))))))]) 
             (Prefix) 
             ({ DumpRenamedAst.hs:8:21-36 }
              (HsAppTy 
               ({ DumpRenamedAst.hs:8:21-24 }
                (HsTyVar 
                 (NotPromoted) 
-                ({ DumpRenamedAst.hs:8:21-24 }{Name: main:DumpRenamedAst.Succ{d rt2}}))) 
+                ({ DumpRenamedAst.hs:8:21-24 }{Name: main:DumpRenamedAst.Succ{d rqN}}))) 
               ({ DumpRenamedAst.hs:8:26-36 }
                (HsParTy 
                 ({ DumpRenamedAst.hs:8:27-35 }
@@ -133,14 +133,14 @@
                   ({ DumpRenamedAst.hs:8:27-32 }
                    (HsTyVar 
                     (NotPromoted) 
-                    ({ DumpRenamedAst.hs:8:27-32 }{Name: main:DumpRenamedAst.Length{tc rr6}}))) 
+                    ({ DumpRenamedAst.hs:8:27-32 }{Name: main:DumpRenamedAst.Length{tc roR}}))) 
                   ({ DumpRenamedAst.hs:8:34-35 }
                    (HsTyVar 
                     (NotPromoted) 
-                    ({ DumpRenamedAst.hs:8:34-35 }{Name: as{tv at8}}))))))))))),
+                    ({ DumpRenamedAst.hs:8:34-35 }{Name: as{tv aqT}}))))))))))),
           ({ DumpRenamedAst.hs:9:3-24 }
            (TyFamEqn 
-            ({ DumpRenamedAst.hs:9:3-8 }{Name: main:DumpRenamedAst.Length{tc rr6}}) 
+            ({ DumpRenamedAst.hs:9:3-8 }{Name: main:DumpRenamedAst.Length{tc roR}}) 
             (HsIB 
              [] 
              [
@@ -153,20 +153,20 @@
             ({ DumpRenamedAst.hs:9:21-24 }
              (HsTyVar 
               (NotPromoted) 
-              ({ DumpRenamedAst.hs:9:21-24 }{Name: main:DumpRenamedAst.Zero{d rt1}})))))])) 
-       ({ DumpRenamedAst.hs:7:13-18 }{Name: main:DumpRenamedAst.Length{tc rr6}}) 
+              ({ DumpRenamedAst.hs:9:21-24 }{Name: main:DumpRenamedAst.Zero{d rqM}})))))])) 
+       ({ DumpRenamedAst.hs:7:13-18 }{Name: main:DumpRenamedAst.Length{tc roR}}) 
        (HsQTvs 
-        [{Name: k{tv at5}}] 
+        [{Name: k{tv aqQ}}] 
         [
          ({ DumpRenamedAst.hs:7:20-30 }
           (KindedTyVar 
-           ({ DumpRenamedAst.hs:7:21-22 }{Name: as{tv at6}}) 
+           ({ DumpRenamedAst.hs:7:21-22 }{Name: as{tv aqR}}) 
            ({ DumpRenamedAst.hs:7:27-29 }
             (HsListTy 
              ({ DumpRenamedAst.hs:7:28 }
               (HsTyVar 
                (NotPromoted) 
-               ({ DumpRenamedAst.hs:7:28 }{Name: k{tv at5}})))))))] {NameSet: 
+               ({ DumpRenamedAst.hs:7:28 }{Name: k{tv aqQ}})))))))] {NameSet: 
         []}) 
        (Prefix) 
        ({ DumpRenamedAst.hs:7:32-39 }
@@ -174,7 +174,7 @@
          ({ DumpRenamedAst.hs:7:35-39 }
           (HsTyVar 
            (NotPromoted) 
-           ({ DumpRenamedAst.hs:7:35-39 }{Name: main:DumpRenamedAst.Peano{tc rt0}}))))) 
+           ({ DumpRenamedAst.hs:7:35-39 }{Name: main:DumpRenamedAst.Peano{tc rqL}}))))) 
        (Nothing))))] 
    [] 
    [])] 
