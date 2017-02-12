@@ -8,7 +8,7 @@
 module TcTypeable(mkTypeableBinds) where
 
 
-import BasicTypes ( SourceText(..), Boxity(..) )
+import BasicTypes ( SourceText(..), Boxity(..), neverInlinePragma )
 import TcBinds( addTypecheckedBinds )
 import IfaceEnv( newGlobalBinder )
 import TyCoRep( Type(..), TyLit(..) )
@@ -22,7 +22,6 @@ import TysPrim ( primTyCons )
 import TysWiredIn ( tupleTyCon, sumTyCon, runtimeRepTyCon
                   , vecCountTyCon, vecElemTyCon
                   , nilDataCon, consDataCon )
-import MkId ( noinlineId )
 import Id
 import Type
 import Kind ( isTYPEApp )
@@ -39,7 +38,7 @@ import VarEnv
 import Constants
 import Fingerprint(Fingerprint(..), fingerprintString, fingerprintFingerprints)
 import Outputable
-import FastString ( FastString, mkFastString )
+import FastString ( FastString, mkFastString, fsLit )
 
 import Data.Maybe ( isJust )
 import Data.Word( Word64 )
@@ -260,8 +259,9 @@ mkTypeableTyConBinds todos
 -- promoted constructors.
 mk_typeable_binds :: TypeableStuff -> TcGblEnv -> TypeRepTodo -> TcM TcGblEnv
 mk_typeable_binds stuff gbl_env todo
-  = do binds <- mapM (mkTyConRepBinds stuff todo) (todo_tycons todo)
-       return $ gbl_env `addTypecheckedBinds` binds
+  = do pairs <- mapM (mkTyConRepBinds stuff todo) (todo_tycons todo)
+       gbl_env <- tcExtendGlobalValEnv (map fst pairs) (return gbl_env)
+       return $ gbl_env `addTypecheckedBinds` map snd pairs
 
 -- | Generate bindings for the type representation of a wired-in 'TyCon's
 -- defined by the virtual "GHC.Prim" module. This is where we inject the
@@ -355,11 +355,18 @@ mkTrNameLit = do
 
 -- | Make typeable bindings for the given 'TyCon'.
 mkTyConRepBinds :: TypeableStuff -> TypeRepTodo
-                -> TypeableTyCon -> TcRn (LHsBinds Id)
+                -> TypeableTyCon -> TcRn (Id, LHsBinds Id)
 mkTyConRepBinds stuff@(Stuff {..}) todo (TypeableTyCon {..})
-  = do tycon_rep_rhs <- mkTyConRepTyConRHS stuff todo tycon tycon_kind
-       let tycon_rep = mkVarBind tycon_rep_id tycon_rep_rhs
-       return $ unitBag tycon_rep
+  = do -- Place a NOINLINE pragma on KindReps since they tend to be quite large
+       -- and bloat interface files.
+       kind_rep_id <- (`setInlinePragma` neverInlinePragma)
+                      <$> newSysLocalId (fsLit "krep") (mkTyConTy kindRepTyCon)
+       kind_rep <- mkTyConKindRep stuff tycon tycon_kind
+
+       tycon_rep_rhs <- mkTyConRepTyConRHS stuff todo tycon kind_rep_id
+       let tycon_rep_bind = mkVarBind tycon_rep_id tycon_rep_rhs
+           kind_rep_bind = mkVarBind kind_rep_id kind_rep
+       return (kind_rep_id, listToBag [tycon_rep_bind, kind_rep_bind])
 
 -- | Here is where we define the set of Typeable types. These exclude type
 -- families and polytypes.
@@ -393,22 +400,16 @@ typeIsTypeable (CoercionTy{})       = panic "typeIsTypeable(Coercion)"
 
 -- | Produce the right-hand-side of a @TyCon@ representation.
 mkTyConRepTyConRHS :: TypeableStuff -> TypeRepTodo
-                   -> TyCon -> Kind
+                   -> TyCon -> Id
                    -> TcRn (LHsExpr Id)
-mkTyConRepTyConRHS stuff@(Stuff {..}) todo tycon tycon_kind
-  = do kind_rep <- mkTyConKindRep stuff tycon tycon_kind
-       -- We mark kind reps as noinline as they tend to get floated
-       -- out and consequently blow up interface file sizes.
-       let kind_rep' = mkLHsWrap (mkWpTyApps [mkTyConTy kindRepTyCon])
-                                 (nlHsVar noinlineId)
-                       `nlHsApp` kind_rep
-       let rep_rhs = nlHsDataCon trTyConDataCon
+mkTyConRepTyConRHS (Stuff {..}) todo tycon kind_rep_id
+  = do let rep_rhs = nlHsDataCon trTyConDataCon
                      `nlHsApp` nlHsLit (word64 dflags high)
                      `nlHsApp` nlHsLit (word64 dflags low)
                      `nlHsApp` mod_rep_expr todo
                      `nlHsApp` trNameLit (mkFastString tycon_str)
                      `nlHsApp` nlHsLit (int n_kind_vars)
-                     `nlHsApp` kind_rep'
+                     `nlHsApp` nlHsVar kind_rep_id
        return rep_rhs
   where
     n_kind_vars = length $ filter isNamedTyConBinder (tyConBinders tycon)
