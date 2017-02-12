@@ -22,6 +22,7 @@ import TysPrim ( primTyCons )
 import TysWiredIn ( tupleTyCon, sumTyCon, runtimeRepTyCon
                   , vecCountTyCon, vecElemTyCon
                   , nilDataCon, consDataCon )
+import MkId ( noinlineId )
 import Id
 import Type
 import Kind ( isTYPEApp )
@@ -396,13 +397,18 @@ mkTyConRepTyConRHS :: TypeableStuff -> TypeRepTodo
                    -> TcRn (LHsExpr Id)
 mkTyConRepTyConRHS stuff@(Stuff {..}) todo tycon tycon_kind
   = do kind_rep <- mkTyConKindRep stuff tycon tycon_kind
+       -- We mark kind reps as noinline as they tend to get floated
+       -- out and consequently blow up interface file sizes.
+       let kind_rep' = mkLHsWrap (mkWpTyApps [mkTyConTy kindRepTyCon])
+                                 (nlHsVar noinlineId)
+                       `nlHsApp` kind_rep
        let rep_rhs = nlHsDataCon trTyConDataCon
                      `nlHsApp` nlHsLit (word64 dflags high)
                      `nlHsApp` nlHsLit (word64 dflags low)
                      `nlHsApp` mod_rep_expr todo
                      `nlHsApp` trNameLit (mkFastString tycon_str)
                      `nlHsApp` nlHsLit (int n_kind_vars)
-                     `nlHsApp` kind_rep
+                     `nlHsApp` kind_rep'
        return rep_rhs
   where
     n_kind_vars = length $ filter isNamedTyConBinder (tyConBinders tycon)
