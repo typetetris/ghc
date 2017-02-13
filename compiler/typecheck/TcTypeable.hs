@@ -111,6 +111,25 @@ There are many wrinkles:
   representations for TyCon and Module.  See GHC.Types
   Note [Runtime representation of modules and tycons]
 
+* The KindReps can unfortunately get quite large. Moreover, the simplifier will
+  float out various pieces of them, resulting in numerous top-level bindings.
+  Consequently we mark the KindRep bindings as noinline, ensuring that the
+  float-outs don't make it into the interface file. This is important since
+  there is generally little benefit to inlining KindReps and they would
+  otherwise strongly affect compiler performance.
+
+* Even KindReps aren't inlined this scheme still has more of an effect on
+  compilation time than I'd like. This is especially true in the case of
+  families of type constructors (e.g. tuples and unboxed sums). The problem is
+  particularly bad in the case of sums, since each arity-N tycon brings with it
+  N promoted datacons, each with a KindRep whose size also scales with N.
+  Consequently we currently simply don't allow sums to be Typeable.
+
+  In general we might consider moving some or all of this generation logic back
+  to the solver since the performance hit we take in doing this at
+  type-definition time is non-trivial and Typeable isn't very widely used. This
+  is discussed in #13261.
+
 -}
 
 -- | Generate the Typeable bindings for a module. This is the only
