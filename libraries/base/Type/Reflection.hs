@@ -2,6 +2,29 @@
 {-# LANGUAGE NoImplicitPrelude #-}
 {-# LANGUAGE PatternSynonyms #-}
 
+-----------------------------------------------------------------------------
+-- |
+-- Module      :  Type.Reflection
+-- Copyright   :  (c) The University of Glasgow, CWI 2001--2017
+-- License     :  BSD-style (see the file libraries/base/LICENSE)
+--
+-- Maintainer  :  libraries@haskell.org
+-- Stability   :  experimental
+-- Portability :  non-portable (requires GADTs and compiler support)
+--
+-- This provides a type-indexed type representation mechanism, similar to that
+-- described by,
+--
+-- * Simon Peyton-Jones, Stephanie Weirich, Richard Eisenberg,
+-- Dimitrios Vytiniotis. "A reflection on types." /Proc. Philip Wadler's 60th
+-- birthday Festschrift/, Edinburgh (April 2016).
+--
+-- The interface provides 'TypeRep', a type representation which can
+-- be safely decomposed and composed. See "Data.Dynamic" for an example of this.
+--
+-- @since 4.10.0.0
+--
+-----------------------------------------------------------------------------
 module Type.Reflection
     ( -- * The Typeable class
       I.Typeable
@@ -24,6 +47,9 @@ module Type.Reflection
     , I.typeRepKind
 
       -- ** Quantified
+      --
+      -- "Data.Typeable" exports a variant of this interface (named differently
+      -- for backwards compatibility).
     , I.SomeTypeRep(..)
     , I.typeRepXTyCon
     , I.rnfSomeTypeRep
