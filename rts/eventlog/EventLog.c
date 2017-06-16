@@ -42,6 +42,21 @@ typedef struct _EventsBuf {
 } EventsBuf;
 
 EventsBuf *capEventBuf; // one EventsBuf for each Capability
+int numCapEventBuf; // How many elements are in capEventBuf
+
+/* Note [setNumCapabilities and the event log]
+   ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+To avoid unnecessary synchronization, the eventlog system maintains a separate
+EventsBuf for each capability, stored in the capEventBuf array. When the number
+of capabilities increases this array must be resized and new EventsBufs
+allocated. This is done by moreCapEventBufs.
+
+To keep things simple, we don't do anything when the capability count decreases.
+Instead we keep the EventsBufs for the now-deceased capabilities around and
+track the size of capEventBuf in numCapEventBuf. Eventually when the program
+ends we flush and release all of the EventsBufs we have accumulated.
+*/
 
 EventsBuf eventBuf; // an EventsBuf not associated with any Capability
 #if defined(THREADED_RTS)
@@ -501,7 +516,7 @@ void
 endEventLogging(void)
 {
     // Flush all events remaining in the buffers.
-    for (uint32_t c = 0; c < n_capabilities; ++c) {
+    for (uint32_t c = 0; c < numCapEventBuf; ++c) {
         printAndClearEventBuf(&capEventBuf[c]);
     }
     printAndClearEventBuf(&eventBuf);
@@ -517,8 +532,9 @@ endEventLogging(void)
 }
 
 void
-moreCapEventBufs (uint32_t from, uint32_t to)
+moreCapEventBufs (uint32_t to)
 {
+    uint32_t from = numCapEventBuf;
     if (from > 0) {
         capEventBuf = stgReallocBytes(capEventBuf, to * sizeof(EventsBuf),
                                       "moreCapEventBufs");
@@ -538,6 +554,7 @@ moreCapEventBufs (uint32_t from, uint32_t to)
            postBlockMarker(&capEventBuf[c]);
         }
     }
+    numCapEventBuf = to;
 }
 
 

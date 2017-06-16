@@ -27,7 +27,7 @@ void initTracing (void);
 void endTracing  (void);
 void freeTracing (void);
 void resetTracing (void);
-void tracingAddCapapilities (uint32_t from, uint32_t to);
+void tracingAddCapapilities (uint32_t to);
 
 #endif /* TRACING */
 
