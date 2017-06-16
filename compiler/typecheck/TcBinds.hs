@@ -435,7 +435,8 @@ tcBindGroups _ _ _ [] thing_inside
 
 tcBindGroups top_lvl sig_fn prag_fn (group : groups) thing_inside
   = do  { -- See Note [Closed binder groups]
-          closed <- isClosedBndrGroup $ snd group
+          type_env <- getLclTypeEnv
+        ; let closed = isClosedBndrGroup type_env (snd group)
         ; (group', (groups', thing))
                 <- tc_group top_lvl sig_fn prag_fn group closed $
                    tcBindGroups top_lvl sig_fn prag_fn groups thing_inside
@@ -1638,8 +1639,8 @@ decideGeneralisationPlan dflags lbinds closed sig_fn
     mono_restriction  = xopt LangExt.MonomorphismRestriction dflags
                      && any restricted binds
 
-    mono_local_binds ClosedGroup = False
-    mono_local_binds _           = xopt LangExt.MonoLocalBinds dflags
+    mono_local_binds (IsGroupClosed _ True) = False
+    mono_local_binds _ = xopt LangExt.MonoLocalBinds dflags
 
     -- With OutsideIn, all nested bindings are monomorphic
     -- except a single function binding with a signature
@@ -1663,44 +1664,54 @@ decideGeneralisationPlan dflags lbinds closed sig_fn
 
     no_sig n = noCompleteSig (sig_fn n)
 
-isClosedBndrGroup :: Bag (LHsBind GhcRn) -> TcM IsGroupClosed
-isClosedBndrGroup binds = do
-    type_env <- getLclTypeEnv
-    if foldUFM (is_closed_ns type_env) True fv_env
-      then return ClosedGroup
-      else return $ NonClosedGroup fv_env
+isClosedBndrGroup :: TcTypeEnv -> Bag (LHsBind GhcRn) -> IsGroupClosed
+isClosedBndrGroup type_env binds
+  = IsGroupClosed fv_env type_closed
   where
+    type_closed = allUFM (nameSetAll is_type_closed_id) fv_env
+
     fv_env :: NameEnv NameSet
     fv_env = mkNameEnv $ concatMap (bindFvs . unLoc) binds
 
     bindFvs :: HsBindLR GhcRn idR -> [(Name, NameSet)]
-    bindFvs (FunBind { fun_id = f, bind_fvs = fvs })
-       = [(unLoc f, fvs)]
+    bindFvs (FunBind { fun_id = L _ f, bind_fvs = fvs })
+       = let open_fvs = filterNameSet (not . is_closed) fvs
+         in [(f, open_fvs)]
     bindFvs (PatBind { pat_lhs = pat, bind_fvs = fvs })
-       = [(b, fvs) | b <- collectPatBinders pat]
+       = let open_fvs = filterNameSet (not . is_closed) fvs
+         in [(b, open_fvs) | b <- collectPatBinders pat]
     bindFvs _
        = []
 
-    is_closed_ns :: TcTypeEnv -> NameSet -> Bool -> Bool
-    is_closed_ns type_env ns b = b && nameSetAll (is_closed_id type_env) ns
-        -- ns are the Names referred to from the RHS of this bind
-
-    is_closed_id :: TcTypeEnv -> Name -> Bool
-    -- See Note [Bindings with closed types] in TcRnTypes
-    is_closed_id type_env name
+    is_closed :: Name -> Bool
+    is_closed name
       | Just thing <- lookupNameEnv type_env name
       = case thing of
-          ATcId { tct_info = ClosedLet } -> True  -- This is the key line
-          ATcId {}                       -> False
-          ATyVar {}                      -> False -- In-scope type variables
-          AGlobal {}                     -> True  --    are not closed!
-          _                              -> pprPanic "is_closed_id" (ppr name)
+          AGlobal {}                     -> True
+          ATcId { tct_info = ClosedLet } -> True
+          _                              -> False
+
       | otherwise
-      = True
-        -- The free-var set for a top level binding mentions
-        -- imported things too, so that we can report unused imports
-        -- These won't be in the local type env.
-        -- Ditto class method etc from the current module
+      = True  -- The free-var set for a top level binding mentions
+
+
+    is_type_closed_id :: Name -> Bool
+    -- We're already removed Global and ClosedLet Ids
+    is_type_closed_id name
+      | Just thing <- lookupNameEnv type_env name
+      = case thing of
+          ATcId { tct_info = NonClosedLet _ cl } -> cl
+          ATcId { tct_info = NotLetBound }       -> False
+          ATyVar {}                              -> True
+               -- In-scope type variables are not closed!
+          _ -> pprPanic "is_closed_id" (ppr name)
+
+      | otherwise
+      = False  -- The free-var set for a top level binding mentions
+               -- imported things too, so that we can report unused imports
+               -- These won't be in the local type env.
+               -- Ditto class method etc from the current module
+
 
 {- *********************************************************************
 *                                                                      *

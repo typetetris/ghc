@@ -40,7 +40,7 @@ module TcRnTypes(
         -- Typechecker types
         TcTypeEnv, TcIdBinderStack, TcIdBinder(..),
         TcTyThing(..), PromotionErr(..),
-        IdBindingInfo(..),
+        IdBindingInfo(..), HasClosedType, RhsNames,
         IsGroupClosed(..),
         SelfBootInfo(..),
         pprTcTyThingCategory, pprPECategory, CompleteMatch(..),
@@ -1043,7 +1043,7 @@ data TcTyThing
   = AGlobal TyThing             -- Used only in the return type of a lookup
 
   | ATcId   {           -- Ids defined in this module; may not be fully zonked
-        tct_id     :: TcId,
+        tct_id   :: TcId,
         tct_info :: IdBindingInfo }   -- See Note [Bindings with closed types]
 
   | ATyVar  Name TcTyVar        -- The type variable to which the lexically scoped type
@@ -1098,19 +1098,35 @@ instance Outputable TcTyThing where     -- Debugging only
 data IdBindingInfo
     = NotLetBound
     | ClosedLet
-    | NonClosedLet NameSet Bool
+    | NonClosedLet RhsNames HasClosedType
 
--- Note [Meaning of IdBindingInfo]
---
--- @NotLetBound@ means that the Id is not let-bound (e.g. it is bound in a
--- lambda-abstraction or in a case pattern).
---
--- @ClosedLet@ means that the Id is let-bound, it is closed and its type is
--- closed as well.
---
--- @NonClosedLet fvs type-closed@ means that the Id is let-bound but it is not
--- closed. The @fvs@ set contains the free variables of the rhs. The type-closed
--- flag indicates if the type of Id is closed.
+type RhsNames = NameSet   -- Names of variables, mentioned on the RHS of
+                          -- a definition, that are not Global or ClosedLet
+  -- That is, each of these Names depends (perhaps transitively) on a
+  -- lambda-bound variable, or a let-bound thing with a type with free
+  -- varibles, which must in turn be lambda bound
+
+type HasClosedType = Bool  -- True <=> the type of this Id
+                           --          has no free type variables
+
+{- Note [Meaning of IdBindingInfo]
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+NotLetBound means that
+  the Id is not let-bound (e.g. it is bound in a
+  lambda-abstraction or in a case pattern)
+
+ClosedLet means that
+   - the Id is let-bound,
+   - its type has no free variables
+   - any free term variables are also Global or ClosedLet
+These ClosedLets can definitely be floated to top level; and we may need
+to do so for static forms.
+
+(NonClosedLet fvs type-closed) means that
+   - the Id is let-bound
+   - the type-closed flag indicates if the type of Id has no free vars
+   - the fvs contains the free names of the RHS
+-}
 
 instance Outputable IdBindingInfo where
   ppr NotLetBound = text "NotLetBound"
@@ -1123,8 +1139,10 @@ instance Outputable IdBindingInfo where
 -- When it is not closed, it provides a map of binder ids to the free vars
 -- in their right-hand sides.
 --
-data IsGroupClosed = ClosedGroup
-                   | NonClosedGroup (NameEnv NameSet)
+data IsGroupClosed
+  = IsGroupClosed
+      (NameEnv RhsNames)  -- Free var info for the RHS of each binding in the goup
+      HasClosedType       -- True <=> all the RhsNames vars have closed types
 
 instance Outputable PromotionErr where
   ppr ClassPE        = text "ClassPE"

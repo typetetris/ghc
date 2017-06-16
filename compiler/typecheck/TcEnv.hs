@@ -101,7 +101,7 @@ import Encoding
 import FastString
 import ListSetOps
 import Util
-import Maybes( MaybeErr(..) )
+import Maybes( MaybeErr(..), orElse )
 import qualified GHC.LanguageExtensions as LangExt
 
 import Data.IORef
@@ -433,27 +433,33 @@ tcExtendLetEnvIds :: TopLevelFlag -> [(Name, TcId)] -> TcM a -> TcM a
 -- Used for both top-level value bindings and and nested let/where-bindings
 -- Does not extend the TcIdBinderStack
 tcExtendLetEnvIds top_lvl
-  = tcExtendLetEnvIds' top_lvl ClosedGroup
+  = tcExtendLetEnvIds' top_lvl (IsGroupClosed emptyNameEnv True)
+       -- Used only when extending with recursive binders,
+       -- when we don't to trigger non-closed-ness. It's like
+       -- starting a fix point iteration from the optimstic end.
+       --     f = ...g...f...
+       -- The closed-ness of this definition depends on g, not on
+       -- the recursive use of f.
 
 tcExtendLetEnvIds' :: TopLevelFlag -> IsGroupClosed
                    -> [(Name,TcId)] -> TcM a
                    -> TcM a
 -- Used for both top-level value bindings and and nested let/where-bindings
 -- Does not extend the TcIdBinderStack
-tcExtendLetEnvIds' top_lvl closed_group pairs thing_inside
+tcExtendLetEnvIds' top_lvl (IsGroupClosed fvs _) pairs thing_inside
   = tc_extend_local_env top_lvl
-      [ (name, ATcId { tct_id = let_id
-                     , tct_info = case closed_group of
-                         ClosedGroup
-                           | isTypeClosedLetBndr let_id -> ClosedLet
-                           | otherwise -> NonClosedLet emptyNameSet False
-                         NonClosedGroup fvs ->
-                           NonClosedLet
-                             (maybe emptyNameSet id $ lookupNameEnv fvs name)
-                             (isTypeClosedLetBndr let_id)
-                     })
+      [ (name, ATcId { tct_id   = let_id
+                     , tct_info = mk_tct_info name let_id })
       | (name, let_id) <- pairs ] $
     thing_inside
+  where
+    mk_tct_info name let_id
+      | type_closed && isEmptyNameSet rhs_fvs = ClosedLet
+      | otherwise                             = NonClosedLet rhs_fvs type_closed
+      where
+        rhs_fvs     = lookupNameEnv fvs name `orElse` emptyNameSet
+        type_closed = isTypeClosedLetBndr let_id
+
 
 tcExtendIdEnv :: [TcId] -> TcM a -> TcM a
 -- For lambda-bound and case-bound Ids
