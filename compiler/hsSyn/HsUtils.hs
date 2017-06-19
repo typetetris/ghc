@@ -756,9 +756,9 @@ mk_easy_FunBind loc fun pats expr
               [mkMatch (mkPrefixFunRhs (L loc fun)) pats expr
                        (noLoc emptyLocalBinds)]
 
--- | Make a prefix 'FunRhs' 'HsMatchContext'
+-- | Make a prefix, non-strict function 'HsMatchContext'
 mkPrefixFunRhs :: Located id -> HsMatchContext id
-mkPrefixFunRhs n = FunRhs n Prefix
+mkPrefixFunRhs n = FunRhs n Prefix NoSrcStrict
 
 ------------
 mkMatch :: HsMatchContext (NameOrRdrName (IdP p)) -> [LPat p] -> LHsExpr p

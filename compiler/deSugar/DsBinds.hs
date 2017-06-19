@@ -149,12 +149,14 @@ dsHsBind dflags
         ; let body' = mkOptTickBox tick body
               rhs   = core_wrap (mkLams args body')
               core_binds@(id,_) = makeCorePair dflags fun False 0 rhs
-              force_var =
-                if xopt LangExt.Strict dflags
-                   && matchGroupArity matches == 0 -- no need to force lambdas
-                then [id]
-                else []
-        ; {- pprTrace "dsHsBind" (ppr fun <+> ppr (idInlinePragma fun)) $ -}
+              force_var
+                  -- Bindings are strict when -XStrict is enabled
+                | xopt LangExt.Strict dflags
+                , matchGroupArity matches == 0 -- no need to force lambdas
+                = [id]
+                | otherwise
+                = []
+        ; pprTrace "dsHsBind" (ppr fun <+> ppr (idInlinePragma fun) $$ ppr (mg_alts matches) $$ ppr args $$ ppr core_binds) $
            return (force_var, [core_binds]) }
 
 dsHsBind dflags
