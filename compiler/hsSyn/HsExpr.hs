@@ -2360,7 +2360,7 @@ data HsMatchContext id -- Not an extensible tag
            , mc_fixity :: LexicalFixity -- ^ fixing of @f@
            , mc_strictness :: SrcStrictness
              -- ^ was the pattern banged? See
-             -- Note [Varities of binding pattern matches]
+             -- Note [Varieties of binding pattern matches]
            }
                                 -- ^A pattern matching on an argument of a
                                 -- function binding

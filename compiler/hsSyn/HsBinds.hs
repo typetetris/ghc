@@ -175,7 +175,7 @@ data HsBindLR idL idR
     --                                        @(f :: a -> a) = ... @
     --
     -- Strict bindings have their strictness recorded in the 'SrcStrictness' of their
-    -- 'MatchContext'. See Note [Varities of binding pattern matches] for
+    -- 'MatchContext'. See Note [Varieties of binding pattern matches] for
     -- details about the relationship between FunBind and PatBind.
     --
     --  'ApiAnnotation.AnnKeywordId's
@@ -219,7 +219,7 @@ data HsBindLR idL idR
   --
   -- The pattern is never a simple variable;
   -- That case is done by FunBind.
-  -- See Note [Varities of binding pattern matches] for details about the
+  -- See Note [Varieties of binding pattern matches] for details about the
   -- relationship between FunBind and PatBind.
 
   --
