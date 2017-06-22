@@ -171,6 +171,7 @@ import qualified Data.Set as S
 import Data.Set (Set)
 import DynamicLoading (initializePlugins)
 
+import qualified Data.Text as DontUseText
 #include "HsVersions.h"
 
 
