@@ -190,7 +190,7 @@ dsHsBind dflags
   = -- See Note [AbsBinds wrappers] in HsBinds
     addDictsDs (toTcTypeBag (listToBag dicts)) $
          -- addDictsDs: push type constraints deeper for pattern match check
-    do { (_, bind_prs) <- dsLHsBinds binds
+    do { (force_vars, bind_prs) <- dsLHsBinds binds
        ; ds_binds <- dsTcEvBinds_s ev_binds
        ; core_wrap <- dsHsWrapper wrap -- Usually the identity
 
@@ -205,7 +205,8 @@ dsHsBind dflags
                main_bind = makeCorePair dflags global' (isDefaultMethod prags)
                                         (dictArity dicts) rhs
 
-       ; return ([], main_bind : fromOL spec_binds) }
+       ; ASSERT(null force_vars)
+         return ([], main_bind : fromOL spec_binds) }
 
         -- Another common case: no tyvars, no dicts
         -- In this case we can have a much simpler desugaring
