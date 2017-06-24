@@ -158,8 +158,8 @@ dsHsBind dflags
                 = [id]
                 | otherwise
                 = []
-        ; --pprTrace "dsHsBind" (ppr fun <+> ppr (idInlinePragma fun) $$ ppr (mg_alts matches) $$ ppr args $$ ppr core_binds) $
-           return (force_var, [core_binds]) }
+        ; -- pprTrace "dsHsBind" (ppr fun <+> ppr (idInlinePragma fun)) $
+          return (force_var, [core_binds]) }
 
 dsHsBind dflags
          (PatBind { pat_lhs = pat, pat_rhs = grhss, pat_rhs_ty = ty
