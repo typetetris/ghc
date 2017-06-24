@@ -140,8 +140,8 @@ dsHsBind dflags
         ; return (force_var, [core_bind]) }
 
 dsHsBind dflags
-         (FunBind { fun_id = L _ fun, fun_matches = matches
-                  , fun_co_fn = co_fn, fun_tick = tick })
+         b@(FunBind { fun_id = L _ fun, fun_matches = matches
+                    , fun_co_fn = co_fn, fun_tick = tick })
  = do   { (args, body) <- matchWrapper
                            (mkPrefixFunRhs (noLoc $ idName fun))
                            Nothing matches
@@ -153,6 +153,8 @@ dsHsBind dflags
                   -- Bindings are strict when -XStrict is enabled
                 | xopt LangExt.Strict dflags
                 , matchGroupArity matches == 0 -- no need to force lambdas
+                = [id]
+                | isBangedBind b
                 = [id]
                 | otherwise
                 = []
@@ -184,7 +186,7 @@ dsHsBind dflags
   | ABE { abe_wrap = wrap, abe_poly = global
         , abe_mono = local, abe_prags = prags } <- export
   , not (xopt LangExt.Strict dflags)             -- Handle strict binds
-  , not (anyBag (isBangedPatBind . unLoc) binds) --        in the next case
+  , not (anyBag (isBangedBind . unLoc) binds)    --        in the next case
   = -- See Note [AbsBinds wrappers] in HsBinds
     addDictsDs (toTcTypeBag (listToBag dicts)) $
          -- addDictsDs: push type constraints deeper for pattern match check
@@ -344,6 +346,8 @@ dsHsBind dflags (AbsBindsSig { abs_tvs = tyvars, abs_ev_vars = dicts
              force_vars
                | xopt LangExt.Strict dflags
                , matchGroupArity matches == 0 -- no need to force lambdas
+               = [global]
+               | isBangedBind (unLoc bind)
                = [global]
                | otherwise
                = []

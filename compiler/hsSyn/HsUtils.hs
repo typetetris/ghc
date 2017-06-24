@@ -72,7 +72,7 @@ module HsUtils(
   noRebindableInfo,
 
   -- Collecting binders
-  isUnliftedHsBind,
+  isUnliftedHsBind, isBangedBind,
 
   collectLocalBinders, collectHsValBinders, collectHsBindListBinders,
   collectHsIdBinders,
@@ -858,6 +858,15 @@ isUnliftedHsBind bind
           -- and overloading.  E.g.  x = (# 1, True #)
           -- would get type forall a. Num a => (# a, Bool #)
           -- and we want to reject that.  See Trac #9140
+
+-- | Is a binding a strict variable bind (e.g. @!x = ...@)?
+isBangedBind :: HsBind GhcTc -> Bool
+isBangedBind b | isBangedPatBind b = True
+isBangedBind (FunBind {fun_matches = matches})
+  | [L _ match] <- unLoc $ mg_alts matches
+  , FunRhs{mc_strictness = SrcStrict} <- m_ctxt match
+  = True
+isBangedBind _ = False
 
 collectLocalBinders :: HsLocalBindsLR idL idR -> [IdP idL]
 collectLocalBinders (HsValBinds binds) = collectHsIdBinders binds
