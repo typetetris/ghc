@@ -2195,7 +2195,7 @@ decl_no_th :: { LHsDecl GhcPs }
                                           (PatBind (L lh _lhs) _rhs _ _ _) ->
                                                 ams (L lh ()) [] >> return () } ;
 
-                                        _ <- ams (L l ()) (ann ++ fst (unLoc $3)) ;
+                                        _ <- ams (L l ()) (ann ++ fst (unLoc $3) ++ mj AnnBang $1) ;
                                         return $! (sL l $ ValD r) } }
 
         | infixexp_top opt_sig rhs  {% do { (ann,r) <- checkValDef empty NoSrcStrict $1 (snd $2) $3;
