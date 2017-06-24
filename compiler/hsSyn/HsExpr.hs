@@ -1543,7 +1543,10 @@ pprMatch match
     ctxt = m_ctxt match
     (herald, other_pats)
         = case ctxt of
-            FunRhs {mc_fun=L _ fun, mc_fixity=fixity}
+            FunRhs {mc_fun=L _ fun, mc_fixity=fixity, mc_strictness=strictness}
+                | strictness == SrcStrict -> ASSERT(null $ m_pats match)
+                                             (char '!'<>pprPrefixOcc fun, m_pats match)
+                        -- a strict variable binding
                 | fixity == Prefix -> (pprPrefixOcc fun, m_pats match)
                         -- f x y z = e
                         -- Not pprBndr; the AbsBinds will
