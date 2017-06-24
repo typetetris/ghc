@@ -66,7 +66,7 @@ https://github.com/haskell/pretty/pull/9).
 module Pretty (
 
         -- * The document type
-        Doc, TextDetails(..),
+        Doc,
 
         -- * Constructing documents
 
@@ -89,7 +89,7 @@ module Pretty (
         sep, cat,
         fsep, fcat,
         nest,
-        hang, hangNotEmpty, punctuate,
+        Pretty.hang, hangNotEmpty, punctuate,
 
         -- * Predicates on documents
         isEmpty,
@@ -103,11 +103,11 @@ module Pretty (
         Mode(..),
 
         -- ** General rendering
-        fullRender, txtPrinter,
+        -- fullRender,
 
         -- ** GHC-specific rendering
         printDoc, printDoc_,
-        bufLeftRender -- performance hack
+        -- bufLeftRender -- performance hack
 
   ) where
 
@@ -122,6 +122,18 @@ import Numeric (showHex)
 --for a RULES
 import GHC.Base ( unpackCString#, unpackNBytes#, Int(..) )
 import GHC.Ptr  ( Ptr(..) )
+
+import qualified Data.Text as T
+import qualified Data.Text.Lazy as TL
+
+import Data.Text.Prettyprint.Doc
+-- PI = PrettyprinterInternal
+import Data.Text.Prettyprint.Doc.Internal as PI
+
+import Data.Text.Prettyprint.Doc.Render.Text
+
+import  GHC.Float (float2Double)
+
 
 -- Don't import Util( assertPanic ) because it makes a loop in the module structure
 
@@ -203,10 +215,16 @@ But it doesn't work, for if x=empty, we would have
 
 -- ---------------------------------------------------------------------------
 -- Operator fixity
-
+{-
 infixl 6 <>
 infixl 6 <+>
 infixl 5 $$, $+$
+-}
+($+$) :: Doc a -> Doc a -> Doc a
+($+$) a b = vsep [a, b]
+
+($$) :: Doc a -> Doc a -> Doc a
+($$) = ($+$)
 
 
 -- ---------------------------------------------------------------------------
@@ -215,6 +233,8 @@ infixl 5 $$, $+$
 -- | The abstract type of documents.
 -- A Doc represents a *set* of layouts. A Doc with
 -- no occurrences of Union or NoDoc represents just one layout.
+{-
+
 data Doc
   = Empty                                            -- empty
   | NilAbove Doc                                     -- text "" $$ x
@@ -224,6 +244,8 @@ data Doc
   | NoDoc                                            -- The empty set of documents
   | Beside Doc Bool Doc                              -- True <=> space between
   | Above Doc Bool Doc                               -- True <=> never overlap
+
+-}
 
 {-
 Here are the invariants:
@@ -260,33 +282,41 @@ Notice the difference between
 
 
 -- | RDoc is a "reduced GDoc", guaranteed not to have a top-level Above or Beside.
-type RDoc = Doc
+-- type RDoc = Doc
 
 -- | The TextDetails data type
 --
 -- A TextDetails represents a fragment of text that will be
 -- output at some point.
+{-
 data TextDetails = Chr  {-# UNPACK #-} !Char -- ^ A single Char fragment
                  | Str  String -- ^ A whole String fragment
                  | PStr FastString                      -- a hashed string
                  | ZStr FastZString                     -- a z-encoded string
-                 | LStr {-# UNPACK #-} !LitString
+                 | LStr {-# UNPACK #-} !LitString {-#UNPACK #-} !Int
                    -- a '\0'-terminated array of bytes
-                 | RStr {-# UNPACK #-} !Int {-# UNPACK #-} !Char
-                   -- a repeated character (e.g., ' ')
+-}
 
+{-
 instance Show Doc where
   showsPrec _ doc cont = fullRender (mode style) (lineLength style)
                                     (ribbonsPerLine style)
                                     txtPrinter cont doc
+-}
 
 
 -- ---------------------------------------------------------------------------
 -- Values and Predicates on GDocs and TextDetails
 
 -- | A document of height and width 1, containing a literal character.
+{-
 char :: Char -> Doc
 char c = textBeside_ (Chr c) 1 Empty
+-}
+
+char :: Char -> Doc a
+char = pretty
+
 
 -- | A document of height 1 containing a literal string.
 -- 'text' satisfies the following laws:
@@ -298,28 +328,26 @@ char c = textBeside_ (Chr c) 1 Empty
 -- The side condition on the last law is necessary because @'text' \"\"@
 -- has height 1, while 'empty' has no height.
 text :: String -> Doc
-text s = textBeside_ (Str s) (length s) Empty
+text s = case length s of {sl -> textBeside_ (Str s)  sl Empty}
 {-# NOINLINE [0] text #-}   -- Give the RULE a chance to fire
                             -- It must wait till after phase 1 when
                             -- the unpackCString first is manifested
 
 -- RULE that turns (text "abc") into (ptext (A# "abc"#)) to avoid the
 -- intermediate packing/unpacking of the string.
-{-# RULES "text/str"
-    forall a. text (unpackCString# a)  = ptext (mkLitString# a)
-  #-}
-{-# RULES "text/unpackNBytes#"
-    forall p n. text (unpackNBytes# p n) = ptext (LitString (Ptr p) (I# n))
-  #-}
+{-# RULES
+  "text/str" forall a. text (unpackCString# a) = ptext (Ptr a)
+ #-}
 
 ftext :: FastString -> Doc
-ftext s = textBeside_ (PStr s) (lengthFS s) Empty
+ftext s = case lengthFS s of {sl -> textBeside_ (PStr s) sl Empty}
 
 ptext :: LitString -> Doc
-ptext s = textBeside_ (LStr s) (lengthLS s) Empty
+ptext s = case lengthLS s of {sl -> textBeside_ (LStr s sl) sl Empty}
 
 ztext :: FastZString -> Doc
-ztext s = textBeside_ (ZStr s) (lengthFZS s) Empty
+ztext s = case lengthFZS s of {sl -> textBeside_ (ZStr s) sl Empty}
+
 
 -- | Some text with any width. (@text s = sizedText (length s) s@)
 sizedText :: Int -> String -> Doc
@@ -340,6 +368,13 @@ empty = Empty
 isEmpty :: Doc -> Bool
 isEmpty Empty = True
 isEmpty _     = False
+
+-- | Produce spacing for indenting the amount specified.
+--
+-- an old version inserted tabs being 8 columns apart in the output.
+spaces :: Int -> String
+spaces !n = replicate n ' '
+-}
 
 {-
 Q: What is the reason for negative indentation (i.e. argument to indent
@@ -370,6 +405,9 @@ translating b horizontally by (k-s). Now if the i^th line of b has an
 indentation k0 < (k-s), it is translated out-of-page, causing
 `negative indentation'.
 -}
+
+-- mega comment
+{-
 
 
 semi   :: Doc -- ^ A ';' character
@@ -654,7 +692,7 @@ nilAboveNest _ _ Empty       = Empty
                                -- Here's why the "text s <>" is in the spec!
 nilAboveNest g k (Nest k1 q) = nilAboveNest g (k + k1) q
 nilAboveNest g k q           | not g && k > 0      -- No newline if no overlap
-                             = textBeside_ (RStr k ' ') k q
+                             = textBeside_ (Str (spaces k)) k q
                              | otherwise           -- Put them really above
                              = nilAbove_ (mkNest k q)
 
@@ -912,6 +950,8 @@ oneLiner (Beside {})         = error "oneLiner Beside"
 
 -- ---------------------------------------------------------------------------
 -- Rendering
+-}
+
 
 -- | A rendering style.
 data Style
@@ -930,11 +970,50 @@ data Mode = PageMode     -- ^ Normal
           | LeftMode     -- ^ No indentation, infinitely long lines
           | OneLineMode  -- ^ All on one line
 
--- | Render the @Doc@ to a String using the given @Style@.
-renderStyle :: Style -> Doc -> String
-renderStyle s = fullRender (mode s) (lineLength s) (ribbonsPerLine s)
-                txtPrinter ""
+-- currently ignoring Mode. Need to respect this later on
+styleToLayoutOptions :: Style -> LayoutOptions
+styleToLayoutOptions s = case (mode s) of
+                          LeftMode -> LayoutOptions Unbounded
+                          _ -> LayoutOptions (AvailablePerLine (lineLength s) (float2Double (ribbonsPerLine s)))
 
+-- | Render the @Doc@ to a String using the given @Style@.
+renderStyle :: Style -> Doc a -> String
+renderStyle s d = TL.unpack $ renderLazy (layoutPretty (styleToLayoutOptions s) d)
+
+printDoc :: Mode -> Int -> Handle -> Doc a -> IO ()
+-- printDoc adds a newline to the end
+printDoc mode cols hdl doc = printDoc_ mode cols hdl (doc <> hardline)
+
+printDoc_ :: Mode -> Int -> Handle -> Doc a -> IO ()
+printDoc_ mode pprCols hdl doc = renderIO hdl (layoutPretty (mkLayoutOptions mode pprCols) doc) where
+  mkLayoutOptions :: Mode -> Int -> LayoutOptions
+  -- Note that this should technically be 1.5 as per the old implementation.
+  -- I have no idea why that is.
+  mkLayoutOptions PageMode pprCols = LayoutOptions (AvailablePerLine pprCols 1.0)
+  mkLayoutOptions LeftMode pprCols = LayoutOptions Unbounded
+
+
+-- printDoc_ does not add a newline at the end, so that
+-- successive calls can output stuff on the same line
+-- Rather like putStr vs putStrLn
+-- printDoc_ LeftMode _ hdl doc
+--   = do { printLeftRender hdl doc; hFlush hdl }
+-- printDoc_ mode pprCols hdl doc
+--   = do { fullRender mode pprCols 1.5 put done doc ;
+--          hFlush hdl }
+--   where
+--     put (Chr c)  next = hPutChar hdl c >> next
+--     put (Str s)  next = hPutStr  hdl s >> next
+--     put (PStr s) next = hPutStr  hdl (unpackFS s) >> next
+--                         -- NB. not hPutFS, we want this to go through
+--                         -- the I/O library's encoding layer. (#3398)
+--     put (ZStr s) next = hPutFZS  hdl s >> next
+--     put (LStr s l) next = hPutLitString hdl s l >> next
+
+--     done = return () -- hPutChar hdl '\n'
+
+
+{-
 -- | Default TextDetails printer
 txtPrinter :: TextDetails -> String -> String
 txtPrinter (Chr c)    s  = c:s
@@ -1106,3 +1185,4 @@ layLeft _ _                  = panic "layLeft: Unhandled case"
 -- Define error=panic, for easier comparison with libraries/pretty.
 error :: String -> a
 error = panic
+-}

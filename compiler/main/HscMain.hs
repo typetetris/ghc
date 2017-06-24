@@ -172,6 +172,8 @@ import Data.Set (Set)
 import DynamicLoading (initializePlugins)
 
 import qualified Data.Text as DontUseText
+import qualified Data.Text.Prettyprint.Doc as DontUsePrettyPrint
+
 #include "HsVersions.h"
 
 
