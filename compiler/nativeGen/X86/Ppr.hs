@@ -981,6 +981,16 @@ pprInstr (XADD format src dst) = pprFormatOpOp (sLit "xadd") format src dst
 pprInstr (CMPXCHG format src dst)
    = pprFormatOpOp (sLit "cmpxchg") format src dst
 
+-- SIMD
+pprInstr (V_ADD format src dst)
+  | VecFormat _ W32 FmtFloat <- format = pprVecFormatOpOp (sLit "addps") format src dst
+  | VecFormat _ W64 FmtFloat <- format = pprVecFormatOpOp (sLit "addpd") format src dst
+  | VecFormat _ W64 FmtInt   <- format = pprVecFormatOpOp (sLit "addpd") format src dst
+pprInstr (V_MOV format src dst)
+  | VecFormat _ W32 FmtFloat <- format = pprVecFormatOpOp (sLit "movaps") format src dst
+  | VecFormat _ W64 FmtFloat <- format = pprVecFormatOpOp (sLit "movapd") format src dst
+  | VecFormat _ _   FmtInt   <- format = pprVecFormatOpOp (sLit "movdqa") format src dst
+
 pprInstr _
         = panic "X86.Ppr.pprInstr: no match"
 
@@ -1302,3 +1312,43 @@ pprCondInstr :: LitString -> Cond -> SDoc -> SDoc
 pprCondInstr name cond arg
   = hcat [ char '\t', ptext name, pprCond cond, space, arg]
 
+pprVecReg :: VecFormat -> Reg -> SDoc
+pprVecReg f r
+  | RegReal    (RealRegSingle i) <- r =
+        sdocWithPlatform $ \platform -> error "pprVecReg"
+  | RegVirtual (VirtualRegSSE u) <- r = text "%vSSE_" <> pprUniqueAlways u
+  | otherwise = pprPanic "pprVecReg: non-vector register" (ppr r)
+
+pprVecOperand :: VecFormat -> Operand -> SDoc
+pprVecOperand f (OpReg r)   = pprVecReg f r
+pprVecOperand _ (OpImm i)   = pprDollImm i
+pprVecOperand _ (OpAddr ea) = pprAddr ea
+
+pprVecFormatOpOp :: LitString -> VecFormat -> Operand -> Operand -> SDoc
+pprVecFormatOpOp name vformat src dest =
+    hcat [ mneumonic, pprVecOperand vformat src, comma, pprVecOperand vformat dest ]
+  where
+    mneumonic
+      | isAvxFormat vformat = char 'v' <> ptext name
+      | isSseFormat vformat = ptext name
+      | otherwise           = pprPanic "pprInstr: Bad format" (ppr vformat)
+
+-- | Does a 'VecFormat' require, at minimum, AVX?
+isAvxFormat :: VecFormat -> Bool
+isAvxFormat (VecFormat 4  W64 _) = True
+isAvxFormat (VecFormat 8  W32 _) = True
+isAvxFormat (VecFormat 16 W16 _) = True
+isAvxFormat (VecFormat 32 W8  _) = True
+isAvxFormat _                    = False
+
+-- | Does a 'VecFormat' require, at minimum, SSE2?
+isSse2Format :: VecFormat -> Bool
+isSse2Format (VecFormat 2 W64 FmtFloat) = True
+isSse2Format _                          = False
+
+-- | Does a 'VecFormat' require, at minimum, SSE?
+isSseFormat :: VecFormat -> Bool
+isSseFormat (VecFormat 4  W32 _) = True
+isSseFormat (VecFormat 8  W16 _) = True
+isSseFormat (VecFormat 16 W8  _) = True
+isSseFormat _                    = False

@@ -50,10 +50,10 @@ type RegNo
 --      Virtual regs can be of either class, so that info is attached.
 --
 data VirtualReg
-        = VirtualRegI  {-# UNPACK #-} !Unique
-        | VirtualRegHi {-# UNPACK #-} !Unique  -- High part of 2-word register
-        | VirtualRegF  {-# UNPACK #-} !Unique
-        | VirtualRegD  {-# UNPACK #-} !Unique
+        = VirtualRegI   {-# UNPACK #-} !Unique
+        | VirtualRegHi  {-# UNPACK #-} !Unique  -- High part of 2-word register
+        | VirtualRegF   {-# UNPACK #-} !Unique
+        | VirtualRegD   {-# UNPACK #-} !Unique
         | VirtualRegSSE {-# UNPACK #-} !Unique
         deriving (Eq, Show)
 
