@@ -113,9 +113,7 @@ module Pretty (
 
 import GhcPrelude hiding (error)
 
-import BufWrite
 import FastString
-import Panic
 import System.IO
 import Numeric (showHex)
 
@@ -328,6 +326,91 @@ char = pretty
 --
 -- The side condition on the last law is necessary because @'text' \"\"@
 -- has height 1, while 'empty' has no height.
+
+text :: String -> Doc a
+text = pretty
+
+-- DEPRECATED
+{-# DEPRECATED zeroWidthText "woo" #-}
+zeroWidthText :: String -> Doc a
+zeroWidthText s = PI.Text 0 (T.pack s)
+
+
+ftext :: FastString -> Doc a
+ftext = pretty . unpackFS
+
+ptext :: LitString -> Doc a
+ptext = pretty . unpackLitString
+
+ztext :: FastZString -> Doc a
+ztext = pretty . zString
+
+-- | Some text with any width. (@text s = sizedText (length s) s@)
+sizedText :: Int -> String -> Doc a
+sizedText size s = PI.Text size (T.pack s)
+
+int      :: Int      -> Doc a -- ^ @int n = text (show n)@
+integer  :: Integer  -> Doc a -- ^ @integer n = text (show n)@
+float    :: Float    -> Doc a -- ^ @float n = text (show n)@
+double   :: Double   -> Doc a -- ^ @double n = text (show n)@
+rational :: Rational -> Doc a -- ^ @rational n = text (show n)@
+int       = pretty
+integer   = pretty
+float     = pretty
+double    = pretty
+rational  = pretty . show
+
+lbrack :: Doc a -- ^ A '[' character
+lbrack = lbracket
+
+rbrack :: Doc a -- ^ A ']' character
+rbrack = rbracket
+
+quotes       :: Doc a -> Doc a -- ^ Wrap document in @\'...\'@
+quotes = squotes
+
+doubleQuotes :: Doc a -> Doc a -- ^ Wrap document in @\"...\"@
+doubleQuotes = dquotes
+
+quote     :: Doc a -> Doc a-- ^Prefix document with @\'@
+quote p        = char '\'' <> p
+
+
+-- | Apply 'parens' to 'Doc' if boolean is true.
+maybeParens :: Bool -> Doc a -> Doc a
+maybeParens False = id
+maybeParens True = parens
+
+empty :: Doc a
+empty = emptyDoc
+
+-- | \"Paragraph fill\" version of 'sep'.
+fsep :: [Doc a] -> Doc a
+fsep = sep
+
+fcat :: [Doc a] -> Doc a
+fcat = cat
+
+-- | Returns 'True' if the document is empty
+isEmpty :: Doc a -> Bool
+isEmpty PI.Empty = True
+isEmpty _     = False
+
+-- | @hang d1 n d2 = sep [d1, nest n d2]@
+hang :: Doc a -> Int -> Doc a -> Doc a
+hang d1 n d2 = sep [d1, nest n d2]
+
+
+
+-- | Apply 'hang' to the arguments if the first 'Doc' is not empty.
+hangNotEmpty :: Doc a -> Int -> Doc a -> Doc a
+hangNotEmpty d1 n d2 = if isEmpty d1
+                       then d2
+                       else Pretty.hang d1 n d2
+
+
+
+{-
 text :: String -> Doc
 text s = case length s of {sl -> textBeside_ (Str s)  sl Empty}
 {-# NOINLINE [0] text #-}   -- Give the RULE a chance to fire
