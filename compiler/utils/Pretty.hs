@@ -355,11 +355,13 @@ integer  :: Integer  -> Doc a -- ^ @integer n = text (show n)@
 float    :: Float    -> Doc a -- ^ @float n = text (show n)@
 double   :: Double   -> Doc a -- ^ @double n = text (show n)@
 rational :: Rational -> Doc a -- ^ @rational n = text (show n)@
+hex      :: Integer  -> Doc a -- ^ @rational n = text (show n)@
 int       = pretty
 integer   = pretty
 float     = pretty
 double    = pretty
 rational  = pretty . show
+hex       = pretty . show -- TODO
 
 lbrack :: Doc a -- ^ A '[' character
 lbrack = lbracket

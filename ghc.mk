@@ -462,7 +462,7 @@ PACKAGES_STAGE1 += ghc-boot-th
 PACKAGES_STAGE1 += ghc-boot
 PACKAGES_STAGE1 += template-haskell
 PACKAGES_STAGE1 += ghc-compact
-PACKAGES_STAGE1 += prettyprinter-core
+PACKAGES_STAGE1 += prettyprinter/prettyprinter
 
 ifeq "$(HADDOCK_DOCS)" "YES"
 PACKAGES_STAGE1 += xhtml
