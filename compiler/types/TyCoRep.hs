@@ -1590,8 +1590,15 @@ tyCoVarsOfCo (Refl _ ty)          = tyCoVarsOfType ty
 tyCoVarsOfCo (TyConAppCo _ _ cos) = tyCoVarsOfCos cos
 tyCoVarsOfCo (AppCo co arg)
   = tyCoVarsOfCo co `unionVarSet` tyCoVarsOfCo arg
-tyCoVarsOfCo (ForAllCo tv kind_co co)
-  = delVarSet (tyCoVarsOfCo co) tv `unionVarSet` tyCoVarsOfCo kind_co
+tyCoVarsOfCo co0@(ForAllCo {})
+  = let go bound free (ForAllCo tv kind_co co) =
+            let bound' = bound `extendVarSet` tv
+                free' = free `unionVarSet` (tyCoVarsOfCo kind_co `minusVarSet` bound)
+            in go bound' free' co
+        go bound free co =
+            let fvs = tyCoVarsOfCo co
+            in (fvs `minusVarSet` bound) `unionVarSet` free
+    in go emptyVarSet emptyVarSet co0
 tyCoVarsOfCo (FunCo _ co1 co2)
   = tyCoVarsOfCo co1 `unionVarSet` tyCoVarsOfCo co2
 tyCoVarsOfCo (CoVarCo v)
