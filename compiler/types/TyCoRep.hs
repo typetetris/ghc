@@ -1494,15 +1494,28 @@ so, so it's easiest to do it here.
 -- a non-deterministic set. For type synonyms it does /not/ expand the
 -- synonym.
 tyCoVarsOfType :: Type -> TyCoVarSet
+tyCoVarsOfType = closeOverKinds . tyCoVarsOfType' emptyVarSet
+
+tyCoVarsOfType' :: TyCoVarSet -> Type -> TyCoVarSet
 -- See Note [Free variables of types]
-tyCoVarsOfType (TyVarTy v)        = tyCoVarsOfType (tyVarKind v) `extendVarSet` v
-tyCoVarsOfType (TyConApp _ tys)   = tyCoVarsOfTypes tys
-tyCoVarsOfType (LitTy {})         = emptyVarSet
-tyCoVarsOfType (AppTy fun arg)    = tyCoVarsOfType fun `unionVarSet` tyCoVarsOfType arg
-tyCoVarsOfType (FunTy arg res)    = tyCoVarsOfType arg `unionVarSet` tyCoVarsOfType res
-tyCoVarsOfType (ForAllTy bndr ty) = tyCoVarsBndr bndr (tyCoVarsOfType ty)
-tyCoVarsOfType (CastTy ty co)     = tyCoVarsOfType ty `unionVarSet` tyCoVarsOfCo co
-tyCoVarsOfType (CoercionTy co)    = tyCoVarsOfCo co
+tyCoVarsOfType' = go
+  where
+    go bound (TyVarTy v)        = go_var bound v
+    go bound (TyConApp _ tys)   = gos bound tys
+    go _     (LitTy {})         = emptyVarSet
+    go bound (AppTy fun arg)    = go bound fun `unionVarSet` go bound arg
+    go bound (FunTy arg res)    = go bound arg `unionVarSet` go bound res
+    go bound (ForAllTy bndr ty) = go (bound `extendVarSet` binderVar bndr) ty
+    go bound (CastTy ty co)     = go bound ty `unionVarSet` tyCoVarsOfCo' bound co
+    go bound (CoercionTy co)    = tyCoVarsOfCo' bound co
+
+    gos bound = unionVarSets . map (go bound)
+
+    go_var bound tv
+      | tv `elemVarSet` bound
+      = emptyVarSet
+      | otherwise
+      = unitVarSet tv
 
 -- | `tyCoFVsOfType` that returns free variables of a type in a deterministic
 -- set. For explanation of why using `VarSet` is not deterministic see
@@ -1543,11 +1556,6 @@ tyCoFVsBndr :: TyVarBinder -> FV -> FV
 tyCoFVsBndr (TvBndr tv _) fvs
   = delFV tv fvs `unionFV` tyCoFVsOfType (tyVarKind tv)
 
--- | Free vars of @forall b. <thing with fvs>@
-tyCoVarsBndr :: TyVarBinder -> VarSet -> VarSet
-tyCoVarsBndr (TvBndr tv _) fvs
-  = delVarSet fvs tv `unionVarSet` tyCoVarsOfType (tyVarKind tv)
-
 -- | Returns free variables of types, including kind variables as
 -- a non-deterministic set. For type synonyms it does /not/ expand the
 -- synonym.
@@ -1586,39 +1594,44 @@ tyCoFVsOfTypes []       fv_cand in_scope acc = emptyFV fv_cand in_scope acc
 tyCoVarsOfCo :: Coercion -> TyCoVarSet
 -- Extracts type and coercion variables from a coercion
 -- See Note [Free variables of types]
-tyCoVarsOfCo (Refl _ ty)          = tyCoVarsOfType ty
-tyCoVarsOfCo (TyConAppCo _ _ cos) = tyCoVarsOfCos cos
-tyCoVarsOfCo (AppCo co arg)
-  = tyCoVarsOfCo co `unionVarSet` tyCoVarsOfCo arg
-tyCoVarsOfCo co0@(ForAllCo {})
-  = let go bound free (ForAllCo tv kind_co co) =
-            let bound' = bound `extendVarSet` tv
-                free' = free `unionVarSet` (tyCoVarsOfCo kind_co `minusVarSet` bound)
-            in go bound' free' co
-        go bound free co =
-            let fvs = tyCoVarsOfCo co
-            in (fvs `minusVarSet` bound) `unionVarSet` free
-    in go emptyVarSet emptyVarSet co0
-tyCoVarsOfCo (FunCo _ co1 co2)
-  = tyCoVarsOfCo co1 `unionVarSet` tyCoVarsOfCo co2
-tyCoVarsOfCo (CoVarCo v)
-  = tyCoVarsOfCoVar v
-tyCoVarsOfCo (HoleCo h)
-  = tyCoVarsOfCoVar (coHoleCoVar h)
-    -- See Note [CoercionHoles and coercion free variables]
-tyCoVarsOfCo (AxiomInstCo _ _ cos)  = tyCoVarsOfCos cos
-tyCoVarsOfCo (UnivCo p _ t1 t2)
-  = tyCoVarsOfProv p `unionVarSet` tyCoVarsOfType t1
-                     `unionVarSet` tyCoVarsOfType t2
-tyCoVarsOfCo (SymCo co)           = tyCoVarsOfCo co
-tyCoVarsOfCo (TransCo co1 co2)    = tyCoVarsOfCo co1 `unionVarSet` tyCoVarsOfCo co2
-tyCoVarsOfCo (NthCo _ _ co)       = tyCoVarsOfCo co
-tyCoVarsOfCo (LRCo _ co)          = tyCoVarsOfCo co
-tyCoVarsOfCo (InstCo co arg)      = tyCoVarsOfCo co `unionVarSet` tyCoVarsOfCo arg
-tyCoVarsOfCo (CoherenceCo c1 c2)  = tyCoVarsOfCo c1 `unionVarSet` tyCoVarsOfCo c2
-tyCoVarsOfCo (KindCo co)          = tyCoVarsOfCo co
-tyCoVarsOfCo (SubCo co)           = tyCoVarsOfCo co
-tyCoVarsOfCo (AxiomRuleCo _ cs)   = tyCoVarsOfCos cs
+tyCoVarsOfCo = closeOverKinds . tyCoVarsOfCo' emptyVarSet
+
+tyCoVarsOfCo' :: TyCoVarSet -> Coercion -> TyCoVarSet
+-- See Note [Free variables of types]
+tyCoVarsOfCo' = go
+  where
+    go bound (Refl _ ty)          = tyCoVarsOfType' bound ty
+    go bound (TyConAppCo _ _ cos) = gos bound cos
+    go bound (AppCo co arg)       = go bound co `unionVarSet` go bound arg
+    go bound (ForAllCo tv kind_co co)
+      = go (bound `extendVarSet` tv) co
+        `unionVarSet` go bound kind_co
+    go bound (FunCo _ co1 co2)
+      = go bound co1 `unionVarSet` go bound co2
+    go bound (CoVarCo v)
+      = go_var bound v
+    go bound (HoleCo h)
+      = go_var bound (coHoleCoVar h)
+        -- See Note [CoercionHoles and coercion free variables]
+    go bound (AxiomInstCo _ _ cos) = gos bound cos
+    go bound (UnivCo p _ t1 t2)
+      = tyCoVarsOfProv p `unionVarSet` tyCoVarsOfType' bound t1
+                         `unionVarSet` tyCoVarsOfType' bound t2
+    go bound (SymCo co)           = go bound co
+    go bound (TransCo co1 co2)    = go bound co1 `unionVarSet` go bound co2
+    go bound (NthCo _ _ co)       = go bound co
+    go bound (LRCo _ co)          = go bound co
+    go bound (InstCo co arg)      = go bound co `unionVarSet` go bound arg
+    go bound (CoherenceCo c1 c2)  = go bound c1 `unionVarSet` go bound c2
+    go bound (KindCo co)          = go bound co
+    go bound (SubCo co)           = go bound co
+    go bound (AxiomRuleCo _ cs)   = gos bound cs
+
+    gos bound = unionVarSets . map (go bound)
+
+    go_var bound v
+      | v `elemVarSet` bound = emptyVarSet
+      | otherwise            = unitVarSet v
 
 -- | Get a deterministic set of the vars free in a coercion
 tyCoVarsOfCoDSet :: Coercion -> DTyCoVarSet
@@ -1662,10 +1675,6 @@ tyCoFVsOfCo (AxiomRuleCo _ cs)  fv_cand in_scope acc = tyCoFVsOfCos cs fv_cand i
 tyCoFVsOfCoVar :: CoVar -> FV
 tyCoFVsOfCoVar v fv_cand in_scope acc
   = (unitFV v `unionFV` tyCoFVsOfType (varType v)) fv_cand in_scope acc
-
-tyCoVarsOfCoVar :: CoVar -> VarSet
-tyCoVarsOfCoVar v
-  = tyCoVarsOfType (varType v) `extendVarSet` v
 
 tyCoVarsOfProv :: UnivCoProvenance -> TyCoVarSet
 tyCoVarsOfProv prov = fvVarSet $ tyCoFVsOfProv prov
@@ -1741,7 +1750,8 @@ coVarsOfCos cos = mapUnionVarSet coVarsOfCo cos
 -- | Add the kind variables free in the kinds of the tyvars in the given set.
 -- Returns a non-deterministic set.
 closeOverKinds :: TyVarSet -> TyVarSet
-closeOverKinds = fvVarSet . closeOverKindsFV . nonDetEltsUniqSet
+closeOverKinds tvs =
+  mapUnionVarSet (tyCoVarsOfType . tyVarKind) (nonDetEltsUniqSet tvs) `unionVarSet` tvs
   -- It's OK to use nonDetEltsUniqSet here because we immediately forget
   -- about the ordering by returning a set.
 
