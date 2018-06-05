@@ -374,36 +374,6 @@ TcTyCons are used for two distinct purposes
 
     In a TcTyCon, everything is zonked after the kind-checking pass (S2).
 
-Note [Check telescope again during generalisation]
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-The telescope check before kind generalisation is useful to catch something
-like this:
-
-  data T a k = MkT (Proxy (a :: k))
-
-Clearly, the k has to come first. Checking for this problem must come before
-kind generalisation, as described in Note [Bad telescopes] in
-TcValidity.
-
-However, we have to check again *after* kind generalisation, to catch something
-like this:
-
-  data SameKind :: k -> k -> Type  -- to force unification
-  data S a (b :: a) (d :: SameKind c b)
-
-Note that c has no explicit binding site. As such, it's quantified by kind
-generalisation. (Note that kcHsTyVarBndrs does not return such variables
-as binders in its returned TcTyCon.) The user-written part of this telescope
-is well-ordered; no earlier variables depend on later ones. However, after
-kind generalisation, we put c up front, like so:
-
-  data S {c :: a} a (b :: a) (d :: SameKind c b)
-
-We now have a problem. We could detect this problem just by looking at the
-free vars of the kinds of the generalised variables (the kvs), but we get
-such a nice error message out of checkValidTelescope that it seems like the
-right thing to do.
-
 Note [Type environment evolution]
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 As we typecheck a group of declarations the type environment evolves.
@@ -518,11 +488,16 @@ kcTyClGroup decls
                  user_tyvars = tcTyConUserTyVars tc
 
               -- See Note [checkValidDependency]
-           ; checkValidDependency tc_binders tc_res_kind
+           ; dependency_ok <- checkValidDependency tc_binders tc_res_kind
 
                -- See Note [Bad telescopes] in TcValidity
-           ; checkValidTelescope tc_binders user_tyvars empty
+           ; telescope_ok <- checkValidTelescope tc_binders user_tyvars
            ; kvs <- kindGeneralize (mkTyConKind tc_binders tc_res_kind)
+
+               -- See Note [Bad telescopes] in TcValidity
+           ; when (telescope_ok && dependency_ok) $
+             -- avoid double-reporting trouble as in dependent/should_fail/BadTelescope3
+             checkKvsToGeneralize kvs tc_binders user_tyvars
 
            ; let all_binders = mkNamedTyConBinders Inferred kvs ++ tc_binders
 
@@ -530,15 +505,16 @@ kcTyClGroup decls
            ; tc_res_kind'        <- zonkTcTypeToType env tc_res_kind
            ; scoped_tvs'         <- zonkSigTyVarPairs scoped_tvs
 
-             -- See Note [Check telescope again during generalisation]
-           ; let extra = text "NB: Implicitly declared variables come before others."
-           ; checkValidTelescope all_binders user_tyvars extra
-
                       -- Make sure tc_kind' has the final, zonked kind variables
            ; traceTc "Generalise kind" $
-             vcat [ ppr name, ppr tc_binders, ppr (mkTyConKind tc_binders tc_res_kind)
-                  , ppr kvs, ppr all_binders, ppr tc_res_kind
-                  , ppr all_binders', ppr tc_res_kind'
+             vcat [ ppr name
+                  , ppr tc_binders
+                  , ppr (mkTyConKind tc_binders tc_res_kind)
+                  , ppr kvs
+                  , ppr all_binders
+                  , ppr tc_res_kind
+                  , ppr all_binders'
+                  , ppr tc_res_kind'
                   , ppr scoped_tvs ]
 
            ; return (mkTcTyCon name user_tyvars all_binders' tc_res_kind'
@@ -3185,15 +3161,16 @@ Type -> k -> Type, where k is unbound. (It won't use a forall for a
 -- | See Note [checkValidDependency]
 checkValidDependency :: [TyConBinder]  -- zonked
                      -> TcKind         -- zonked (result kind)
-                     -> TcM ()
+                     -> TcM Bool       -- True <=> everything is ok
 checkValidDependency binders res_kind
-  = go (tyCoVarsOfType res_kind) (reverse binders)
+  = go (tyCoVarsOfType res_kind) (reverse binders) True
   where
     go :: TyCoVarSet     -- fvs from scope
        -> [TyConBinder]  -- binders, in reverse order
-       -> TcM ()
-    go _   []           = return ()  -- all set
-    go fvs (tcb : tcbs)
+       -> Bool           -- everything OK so far
+       -> TcM Bool
+    go _   []           ok = return ok  -- all set
+    go fvs (tcb : tcbs) ok
       | not (isNamedTyConBinder tcb) && tcb_var `elemVarSet` fvs
       = do { setSrcSpan (getSrcSpan tcb_var) $
              addErrTc (vcat [ text "Type constructor argument" <+> quotes (ppr tcb_var) <+>
@@ -3204,10 +3181,10 @@ checkValidDependency binders res_kind
                                  2 (vcat (map pp_binder binders))
                             , text "Suggestion: use" <+> quotes (ppr tcb_var) <+>
                               text "in a kind to make the dependency clearer." ])
-           ; go new_fvs tcbs }
+           ; go new_fvs tcbs False }
 
       | otherwise
-      = go new_fvs tcbs
+      = go new_fvs tcbs ok
       where
         new_fvs = fvs `delVarSet` tcb_var
                       `unionVarSet` tyCoVarsOfType tcb_kind

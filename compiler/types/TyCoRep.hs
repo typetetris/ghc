@@ -1484,9 +1484,24 @@ a VarSet that is closed over the types of its variables.  More precisely,
 
 Example: The tyCoVars of this ((a:* -> k) Int) is {a, k}.
 
-We could /not/ close over the kinds of the variable occurrences, and
+We could /not/ close over the kinds of the variables here, and
 instead do so at call sites, but it seems that we always want to do
-so, so it's easiest to do it here.
+so, so it's easiest to do it here. See Note [Closing over free variable kinds]
+
+Note [Closing over free variable kinds]
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+Note that it's necessary to close over kinds at the /end/ of collecting
+the variables. This is for two reasons:
+ 1. Efficiency. If we have Proxy (a::k) -> Proxy (a::k) -> Proxy (a::k), then
+    we don't want to have to traverse k more than once.
+
+ 2. Correctness. Imagine we have forall k. b -> k, where b has
+    kind k, for some k bound in an outer scope. If we look at b's kind inside
+    the forall, we'll collect that k is free and then remove k from the set of
+    free variables. This is plain wrong. We must instead compute that b is free
+    and then conclude that b's kind is free.
+
 -}
 
 
@@ -1494,6 +1509,7 @@ so, so it's easiest to do it here.
 -- a non-deterministic set. For type synonyms it does /not/ expand the
 -- synonym.
 tyCoVarsOfType :: Type -> TyCoVarSet
+-- See Note [Free variables of types]
 tyCoVarsOfType = closeOverKinds . tyCoVarsOfType' emptyVarSet
 
 tyCoVarsOfType' :: TyCoVarSet -> Type -> TyCoVarSet
@@ -1697,6 +1713,10 @@ tyCoFVsOfCos :: [Coercion] -> FV
 tyCoFVsOfCos []       fv_cand in_scope acc = emptyFV fv_cand in_scope acc
 tyCoFVsOfCos (co:cos) fv_cand in_scope acc = (tyCoFVsOfCo co `unionFV` tyCoFVsOfCos cos) fv_cand in_scope acc
 
+-- NB: We can't just collect the covars and then closeOverKinds, because that
+-- would miss a covar mentioned only in the kind of a type variable. Also,
+-- this can't suffer from the problem in Note [Closiing over free variable kinds]
+-- because we can't bind coercion variables locally in a type.
 coVarsOfType :: Type -> CoVarSet
 coVarsOfType (TyVarTy v)         = coVarsOfType (tyVarKind v)
 coVarsOfType (TyConApp _ tys)    = coVarsOfTypes tys
