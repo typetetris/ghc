@@ -60,6 +60,7 @@ import qualified Stream
 
 import Control.Monad (ap)
 import Data.List (sort, groupBy, head)
+import Data.Maybe (mapMaybe)
 
 -- ----------------------------------------------------------------------------
 -- * Some Data Types
@@ -158,43 +159,43 @@ llvmFunArgs dflags live =
 
 
 isFPR :: GlobalReg -> Bool
-isFPR (FloatReg _)  = True
-isFPR (DoubleReg _) = True
-isFPR (XmmReg _)    = True
-isFPR (YmmReg _)    = True
-isFPR (ZmmReg _)    = True
-isFPR _             = False
+isFPR (FloatReg _)   = True
+isFPR (DoubleReg _)  = True
+isFPR (XmmReg _ _ _) = True
+isFPR (YmmReg _)     = True
+isFPR (ZmmReg _)     = True
+isFPR _              = False
 
 sameFPRClass :: GlobalReg -> GlobalReg -> Bool
-sameFPRClass (FloatReg _)  (FloatReg _) = True
-sameFPRClass (DoubleReg _) (DoubleReg _) = True
-sameFPRClass (XmmReg _)    (XmmReg _) = True
-sameFPRClass (YmmReg _)    (YmmReg _) = True
-sameFPRClass (ZmmReg _)    (ZmmReg _) = True
-sameFPRClass _             _          = False
+sameFPRClass (FloatReg _)   (FloatReg _)   = True
+sameFPRClass (DoubleReg _)  (DoubleReg _)  = True
+sameFPRClass (XmmReg _ _ _) (XmmReg _ _ _) = True
+sameFPRClass (YmmReg _)     (YmmReg _)     = True
+sameFPRClass (ZmmReg _)     (ZmmReg _)     = True
+sameFPRClass _              _              = False
 
 normalizeFPRNum :: GlobalReg -> GlobalReg
-normalizeFPRNum (FloatReg _)  = FloatReg 1
-normalizeFPRNum (DoubleReg _) = DoubleReg 1
-normalizeFPRNum (XmmReg _)    = XmmReg 1
-normalizeFPRNum (YmmReg _)    = YmmReg 1
-normalizeFPRNum (ZmmReg _)    = ZmmReg 1
+normalizeFPRNum (FloatReg _)   = FloatReg 1
+normalizeFPRNum (DoubleReg _)  = DoubleReg 1
+normalizeFPRNum (XmmReg _ _ _) = XmmReg 1
+normalizeFPRNum (YmmReg _)     = YmmReg 1
+normalizeFPRNum (ZmmReg _)     = ZmmReg 1
 normalizeFPRNum _ = error "normalizeFPRNum expected only FPR regs"
 
 getFPRCtor :: GlobalReg -> Int -> GlobalReg
-getFPRCtor (FloatReg _)  = FloatReg
-getFPRCtor (DoubleReg _) = DoubleReg
-getFPRCtor (XmmReg _)    = XmmReg
-getFPRCtor (YmmReg _)    = YmmReg
-getFPRCtor (ZmmReg _)    = ZmmReg
+getFPRCtor (FloatReg _)   = FloatReg
+getFPRCtor (DoubleReg _)  = DoubleReg
+getFPRCtor (XmmReg _ a b) = \n -> XmmReg n a b
+getFPRCtor (YmmReg _)     = YmmReg
+getFPRCtor (ZmmReg _)     = ZmmReg
 getFPRCtor _ = error "getFPRCtor expected only FPR regs"
 
 fprRegNum :: GlobalReg -> Int
-fprRegNum (FloatReg i)  = i
-fprRegNum (DoubleReg i) = i
-fprRegNum (XmmReg i)    = i
-fprRegNum (YmmReg i)    = i
-fprRegNum (ZmmReg i)    = i
+fprRegNum (FloatReg i)   = i
+fprRegNum (DoubleReg i)  = i
+fprRegNum (XmmReg i _ _) = i
+fprRegNum (YmmReg i)     = i
+fprRegNum (ZmmReg i)     = i
 fprRegNum _ = error "fprRegNum expected only FPR regs"
 
 -- | Input: dynflags, and the list of live registers

@@ -501,7 +501,7 @@ activeStgRegs = [
     ,DoubleReg 1
 #endif
 #if defined(REG_XMM1)
-    ,XmmReg 1
+    ,XmmReg 1 Nothing Nothing
 #endif
 #if defined(REG_YMM1)
     ,YmmReg 1
@@ -516,7 +516,7 @@ activeStgRegs = [
     ,DoubleReg 2
 #endif
 #if defined(REG_XMM2)
-    ,XmmReg 2
+    ,XmmReg 2 Nothing Nothing
 #endif
 #if defined(REG_YMM2)
     ,YmmReg 2
@@ -531,7 +531,7 @@ activeStgRegs = [
     ,DoubleReg 3
 #endif
 #if defined(REG_XMM3)
-    ,XmmReg 3
+    ,XmmReg 3 Nothing Nothing
 #endif
 #if defined(REG_YMM3)
     ,YmmReg 3
@@ -546,7 +546,7 @@ activeStgRegs = [
     ,DoubleReg 4
 #endif
 #if defined(REG_XMM4)
-    ,XmmReg 4
+    ,XmmReg 4 Nothing Nothing
 #endif
 #if defined(REG_YMM4)
     ,YmmReg 4
@@ -561,7 +561,7 @@ activeStgRegs = [
     ,DoubleReg 5
 #endif
 #if defined(REG_XMM5)
-    ,XmmReg 5
+    ,XmmReg 5 Nothing Nothing
 #endif
 #if defined(REG_YMM5)
     ,YmmReg 5
@@ -576,7 +576,7 @@ activeStgRegs = [
     ,DoubleReg 6
 #endif
 #if defined(REG_XMM6)
-    ,XmmReg 6
+    ,XmmReg 6 Nothing Nothing
 #endif
 #if defined(REG_YMM6)
     ,YmmReg 6
@@ -739,22 +739,22 @@ globalRegMaybe (DoubleReg 6)            =
 # endif
 # if MAX_REAL_XMM_REG != 0
 #  if defined(REG_XMM1)
-globalRegMaybe (XmmReg 1)               = Just (RealRegSingle REG_XMM1)
+globalRegMaybe (XmmReg 1 _ _)               = Just (RealRegSingle REG_XMM1)
 #  endif
 #  if defined(REG_XMM2)
-globalRegMaybe (XmmReg 2)               = Just (RealRegSingle REG_XMM2)
+globalRegMaybe (XmmReg 2 _ _)               = Just (RealRegSingle REG_XMM2)
 #  endif
 #  if defined(REG_XMM3)
-globalRegMaybe (XmmReg 3)               = Just (RealRegSingle REG_XMM3)
+globalRegMaybe (XmmReg 3 _ _)               = Just (RealRegSingle REG_XMM3)
 #  endif
 #  if defined(REG_XMM4)
-globalRegMaybe (XmmReg 4)               = Just (RealRegSingle REG_XMM4)
+globalRegMaybe (XmmReg 4 _ _)               = Just (RealRegSingle REG_XMM4)
 #  endif
 #  if defined(REG_XMM5)
-globalRegMaybe (XmmReg 5)               = Just (RealRegSingle REG_XMM5)
+globalRegMaybe (XmmReg 5 _ _)               = Just (RealRegSingle REG_XMM5)
 #  endif
 #  if defined(REG_XMM6)
-globalRegMaybe (XmmReg 6)               = Just (RealRegSingle REG_XMM6)
+globalRegMaybe (XmmReg 6 _ _)               = Just (RealRegSingle REG_XMM6)
 #  endif
 # endif
 # if defined(MAX_REAL_YMM_REG) && MAX_REAL_YMM_REG != 0
