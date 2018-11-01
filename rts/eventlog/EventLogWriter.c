@@ -36,24 +36,29 @@ static void stopEventLogFileWriter(void);
 static void
 initEventLogFileWriter(void)
 {
-    char *prog, *event_log_filename;
+    char *event_log_filename;
 
-    prog = stgMallocBytes(strlen(prog_name) + 1, "initEventLogFileWriter");
-    strcpy(prog, prog_name);
+    if (RtsFlags.TraceFlags.trace_output) {
+        event_log_filename = RtsFlags.TraceFlags.trace_output;
+    } else {
+        char *prog = stgMallocBytes(strlen(prog_name) + 1,
+                                    "initEventLogFileWriter");
+        strcpy(prog, prog_name);
 #if defined(mingw32_HOST_OS)
-    // on Windows, drop the .exe suffix if there is one
-    {
-        char *suff;
-        suff = strrchr(prog,'.');
-        if (suff != NULL && !strcmp(suff,".exe")) {
-            *suff = '\0';
+        // on Windows, drop the .exe suffix if there is one
+        {
+            char *suff;
+            suff = strrchr(prog,'.');
+            if (suff != NULL && !strcmp(suff,".exe")) {
+                *suff = '\0';
+            }
         }
-    }
 #endif
-    event_log_filename = stgMallocBytes(strlen(prog)
-                                        + 10 /* .%d */
-                                        + 10 /* .eventlog */,
-                                        "initEventLogFileWriter");
+        event_log_filename = stgMallocBytes(strlen(prog)
+                                            + 10 /* .%d */
+                                            + 10 /* .eventlog */,
+                                            "initEventLogFileWriter");
+    }
 
     if (event_log_pid == -1) { // #4512
         // Single process
